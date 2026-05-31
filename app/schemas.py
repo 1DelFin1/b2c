@@ -129,6 +129,66 @@ class CartItemUpdateRequest(BaseModel):
     quantity: int = Field(ge=1)
 
 
+class UnavailableReason(str, Enum):
+    OUT_OF_STOCK = "OUT_OF_STOCK"
+    PRODUCT_BLOCKED = "PRODUCT_BLOCKED"
+    PRODUCT_DELISTED = "PRODUCT_DELISTED"
+    SKU_DISABLED = "SKU_DISABLED"
+
+
+class CartItemEnriched(BaseModel):
+    """Cart item enriched with live B2B data."""
+    item_id: UUID          # equals sku_id (used as position identifier)
+    sku_id: UUID
+    product_id: UUID
+    product_title: str
+    sku_name: str
+    image_url: str | None = None
+    unit_price: int        # current price from B2B (kopecks)
+    quantity: int
+    available_stock: int
+    line_total: int        # 0 for unavailable items
+    available: bool
+    unavailable_reason: UnavailableReason | None = None
+
+
+class CartSummary(BaseModel):
+    total_amount: int
+    total_items: int       # distinct positions
+    total_quantity: int    # sum of quantities
+    available_items: int
+    has_unavailable_items: bool
+    checkout_ready: bool
+    currency: str = "RUB"
+
+
+class CheckoutItem(BaseModel):
+    product_id: UUID
+    sku_id: UUID
+    quantity: int
+    unit_price: int
+    line_total: int
+
+
+class CheckoutPayload(BaseModel):
+    items: list[CheckoutItem]
+    total_amount: int
+    currency: str = "RUB"
+
+
+class CartEnrichedResponse(BaseModel):
+    items: list[CartItemEnriched]
+    summary: CartSummary
+    checkout_payload: CheckoutPayload
+
+
+class CartMutationResponse(BaseModel):
+    message: str
+    item: CartItemEnriched
+    summary: CartSummary
+
+
+# Legacy response (used by validate endpoint)
 class CartItemResponse(BaseModel):
     sku_id: UUID
     product_id: UUID
@@ -144,7 +204,7 @@ class CartItemResponse(BaseModel):
 
 
 class CartResponse(BaseModel):
-    id: UUID  # identity (user_id or session_id)
+    id: UUID
     items: list[CartItemResponse]
     items_count: int
     subtotal: int

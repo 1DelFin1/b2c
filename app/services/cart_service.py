@@ -7,7 +7,19 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException, status
 
 from app.core.redis_client import redis_client
-from app.schemas import CartItemStored, CartItemResponse, CartResponse, ImageRef
+from app.schemas import (
+    CartEnrichedResponse,
+    CartItemEnriched,
+    CartItemResponse,
+    CartItemStored,
+    CartMutationResponse,
+    CartResponse,
+    CartSummary,
+    CheckoutItem,
+    CheckoutPayload,
+    ImageRef,
+    UnavailableReason,
+)
 
 
 class CartService:
@@ -214,7 +226,175 @@ class CartService:
         return affected
 
     # ------------------------------------------------------------------
-    # Response builder
+    # B2B enrichment
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def enrich(
+        cls,
+        stored: list[CartItemStored],
+        b2b_products: list[dict],
+    ) -> CartEnrichedResponse:
+        """Build CartEnrichedResponse from stored items and B2B product list."""
+        # Build lookup: {product_id: {sku_id: sku_dict}}
+        product_map: dict[str, dict] = {}
+        product_status: dict[str, str] = {}
+        for p in b2b_products:
+            pid = str(p["id"])
+            product_status[pid] = p.get("status", "MODERATED")
+            product_map[pid] = {str(s["id"]): s for s in (p.get("skus") or [])}
+
+        enriched: list[CartItemEnriched] = []
+        for item in stored:
+            pid = str(item.product_id)
+            sid = str(item.sku_id)
+
+            if pid not in product_map:
+                enriched.append(CartItemEnriched(
+                    item_id=item.sku_id,
+                    sku_id=item.sku_id,
+                    product_id=item.product_id,
+                    product_title=item.name,
+                    sku_name=item.name,
+                    image_url=item.image_url,
+                    unit_price=item.unit_price_at_add,
+                    quantity=item.quantity,
+                    available_stock=0,
+                    line_total=0,
+                    available=False,
+                    unavailable_reason=UnavailableReason.PRODUCT_DELISTED,
+                ))
+                continue
+
+            status_val = product_status.get(pid, "MODERATED")
+            if status_val not in ("MODERATED", "ACTIVE"):
+                enriched.append(CartItemEnriched(
+                    item_id=item.sku_id,
+                    sku_id=item.sku_id,
+                    product_id=item.product_id,
+                    product_title=item.name,
+                    sku_name=item.name,
+                    image_url=item.image_url,
+                    unit_price=item.unit_price_at_add,
+                    quantity=item.quantity,
+                    available_stock=0,
+                    line_total=0,
+                    available=False,
+                    unavailable_reason=UnavailableReason.PRODUCT_BLOCKED,
+                ))
+                continue
+
+            sku_map = product_map[pid]
+            if sid not in sku_map:
+                enriched.append(CartItemEnriched(
+                    item_id=item.sku_id,
+                    sku_id=item.sku_id,
+                    product_id=item.product_id,
+                    product_title=item.name,
+                    sku_name=item.name,
+                    image_url=item.image_url,
+                    unit_price=item.unit_price_at_add,
+                    quantity=item.quantity,
+                    available_stock=0,
+                    line_total=0,
+                    available=False,
+                    unavailable_reason=UnavailableReason.SKU_DISABLED,
+                ))
+                continue
+
+            sku = sku_map[sid]
+            price = int(sku.get("price") or item.unit_price_at_add)
+            stock = int(sku.get("active_quantity") or 0)
+            p_data = next((p for p in b2b_products if str(p["id"]) == pid), {})
+            p_title = p_data.get("title") or item.name
+            images = sku.get("images") or []
+            img_url = (
+                images[0].get("url") if images and isinstance(images[0], dict)
+                else item.image_url
+            )
+
+            if stock == 0:
+                enriched.append(CartItemEnriched(
+                    item_id=item.sku_id,
+                    sku_id=item.sku_id,
+                    product_id=item.product_id,
+                    product_title=p_title,
+                    sku_name=sku.get("name") or item.name,
+                    image_url=img_url,
+                    unit_price=price,
+                    quantity=item.quantity,
+                    available_stock=0,
+                    line_total=0,
+                    available=False,
+                    unavailable_reason=UnavailableReason.OUT_OF_STOCK,
+                ))
+                continue
+
+            enriched.append(CartItemEnriched(
+                item_id=item.sku_id,
+                sku_id=item.sku_id,
+                product_id=item.product_id,
+                product_title=p_title,
+                sku_name=sku.get("name") or item.name,
+                image_url=img_url,
+                unit_price=price,
+                quantity=item.quantity,
+                available_stock=stock,
+                line_total=price * item.quantity,
+                available=True,
+                unavailable_reason=None,
+            ))
+
+        return cls._build_cart_response(enriched)
+
+    @classmethod
+    def _build_cart_response(cls, items: list[CartItemEnriched]) -> CartEnrichedResponse:
+        available = [i for i in items if i.available]
+        total_amount = sum(i.line_total for i in available)
+        summary = CartSummary(
+            total_amount=total_amount,
+            total_items=len(items),
+            total_quantity=sum(i.quantity for i in items),
+            available_items=len(available),
+            has_unavailable_items=len(available) < len(items),
+            checkout_ready=len(available) > 0 and len(available) == len(items),
+        )
+        checkout_payload = CheckoutPayload(
+            items=[
+                CheckoutItem(
+                    product_id=i.product_id,
+                    sku_id=i.sku_id,
+                    quantity=i.quantity,
+                    unit_price=i.unit_price,
+                    line_total=i.line_total,
+                )
+                for i in available
+            ],
+            total_amount=total_amount,
+        )
+        return CartEnrichedResponse(items=items, summary=summary, checkout_payload=checkout_payload)
+
+    @classmethod
+    def make_mutation_response(
+        cls,
+        message: str,
+        item: CartItemEnriched,
+        all_stored: list[CartItemStored],
+    ) -> CartMutationResponse:
+        """Quick summary using stored prices (no B2B round-trip needed for mutations)."""
+        total_amount = sum(s.unit_price_at_add * s.quantity for s in all_stored)
+        summary = CartSummary(
+            total_amount=total_amount,
+            total_items=len(all_stored),
+            total_quantity=sum(s.quantity for s in all_stored),
+            available_items=len(all_stored),
+            has_unavailable_items=False,
+            checkout_ready=len(all_stored) > 0,
+        )
+        return CartMutationResponse(message=message, item=item, summary=summary)
+
+    # ------------------------------------------------------------------
+    # Response builder (legacy — used by validate endpoint)
     # ------------------------------------------------------------------
 
     @classmethod
