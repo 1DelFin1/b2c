@@ -225,6 +225,50 @@ class CartService:
 
         return affected
 
+    @classmethod
+    async def mark_skus_unavailable_in_all_carts(
+        cls,
+        sku_ids: list[UUID],
+        reason: str,
+    ) -> int:
+        """Scan all carts and set unavailable_reason on items matching any of the given sku_ids.
+
+        Returns the number of cart items updated across all carts.
+        Items are kept in the cart (not deleted) so buyers see the reason on next visit.
+        """
+        import json as _json
+
+        sku_strs = {str(sid) for sid in sku_ids}
+        pattern = f"{cls.CART_KEY_PREFIX}:*"
+        updated_count = 0
+
+        cursor = 0
+        while True:
+            cursor, keys = await redis_client.scan(cursor, match=pattern, count=100)
+            for key in keys:
+                raw = await redis_client.get(key)
+                if not raw:
+                    continue
+                try:
+                    items: list[dict] = _json.loads(raw)
+                    if not isinstance(items, list):
+                        continue
+                    changed = False
+                    for item in items:
+                        if item.get("sku_id") in sku_strs:
+                            item["unavailable_reason"] = reason
+                            changed = True
+                            updated_count += 1
+                    if changed:
+                        identity = key[len(cls.CART_KEY_PREFIX) + 1:]
+                        await cls._save_raw(identity, items)
+                except Exception:
+                    continue
+            if cursor == 0:
+                break
+
+        return updated_count
+
     # ------------------------------------------------------------------
     # B2B enrichment
     # ------------------------------------------------------------------

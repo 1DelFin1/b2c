@@ -118,6 +118,7 @@ class CartItemStored(BaseModel):
     image_url: str | None = None
     quantity: int
     unit_price_at_add: int  # price (in kopecks) when item was added
+    unavailable_reason: str | None = None  # set by product events (PRODUCT_BLOCKED etc.)
 
 
 class CartItemAddRequest(BaseModel):
@@ -527,6 +528,23 @@ class B2BEvent(BaseModel):
     idempotency_key: UUID
     occurred_at: datetime
     payload: dict
+
+
+# ---------------------------------------------------------------------------
+# Product events (canon format: POST /api/v1/events/product)
+# ---------------------------------------------------------------------------
+
+class ProductEventRequest(BaseModel):
+    """Incoming event from B2B about product/SKU lifecycle changes.
+
+    Matches the canonical format in b2c-orders-flows.md#b2c-12-handle-events.
+    """
+    idempotency_key: UUID
+    event: Literal["PRODUCT_BLOCKED", "PRODUCT_DELETED", "SKU_OUT_OF_STOCK"]
+    product_id: UUID
+    sku_ids: list[UUID] = Field(default_factory=list)
+    reason: str | None = None
+    date: datetime
 
 
 # ---------------------------------------------------------------------------

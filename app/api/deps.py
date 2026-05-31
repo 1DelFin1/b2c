@@ -109,12 +109,16 @@ def get_optional_user_id(request: Request) -> UUID | None:
         return None
 
 
-async def verify_service_key(x_service_key: str = Header(..., alias="X-Service-Key")) -> str:
-    """Validate X-Service-Key header for internal service-to-service calls."""
-    if x_service_key != settings.service.SERVICE_KEY:
+async def verify_service_key(x_service_key: str | None = Header(default=None, alias="X-Service-Key")) -> str:
+    """Validate X-Service-Key header for internal service-to-service calls.
+
+    Returns 401 (not 422) when the header is absent or incorrect, so callers
+    cannot distinguish "header missing" from "wrong key" (avoids enumeration).
+    """
+    if not x_service_key or x_service_key != settings.service.SERVICE_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid service key",
+            detail="Invalid or missing service key",
         )
     return x_service_key
 
