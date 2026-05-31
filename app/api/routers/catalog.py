@@ -239,6 +239,19 @@ async def get_similar_products(
     )
 
 
+def _enrich_tree_with_parent_id(nodes: list, parent_id: str | None = None) -> list:
+    """Inject parent_id into each tree node — B2B CategoryTreeResponse omits it."""
+    result = []
+    for node in nodes:
+        result.append({
+            "id": node.get("id"),
+            "name": node.get("name"),
+            "parent_id": parent_id,
+            "children": _enrich_tree_with_parent_id(node.get("children", []), parent_id=node.get("id")),
+        })
+    return result
+
+
 @products_router.get("/categories")
 async def get_categories_tree():
     """Full category tree for B2C navigation."""
@@ -253,8 +266,97 @@ async def get_categories_tree():
             )
     data = resp.json()
     if resp.status_code == 200 and isinstance(data, list):
-        return JSONResponse(content={"items": data}, status_code=200)
+        return JSONResponse(content={"items": _enrich_tree_with_parent_id(data)}, status_code=200)
     return JSONResponse(content=data, status_code=resp.status_code)
+
+
+@products_router.get("/breadcrumbs")
+async def get_breadcrumbs(
+    category_id: UUID | None = Query(default=None),
+    product_id: UUID | None = Query(default=None),
+):
+    """Canonical breadcrumb chain from root to target category or product's category."""
+    if category_id is not None and product_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "ambiguous_param", "message": "only one of category_id or product_id must be provided"},
+        )
+    if category_id is None and product_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "missing_param", "message": "category_id or product_id must be provided"},
+        )
+
+    resolved_via = "category_id"
+    resolved_category_id: UUID = category_id  # type: ignore[assignment]
+
+    if product_id is not None:
+        resolved_via = "product_id"
+        url = f"{settings.service.B2B_URL}/api/v1/public/products/{product_id}"
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            try:
+                resp = await client.get(url, headers={"X-Service-Key": settings.service.SERVICE_KEY})
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={"code": "UPSTREAM_UNAVAILABLE", "message": f"B2B service unavailable: {exc}"},
+                )
+        if resp.status_code != 200:
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        resolved_category_id = resp.json().get("category_id")
+
+    url = f"{settings.service.B2B_URL}/api/v1/categories/{resolved_category_id}/breadcrumbs"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.get(url, headers={"X-Service-Key": settings.service.SERVICE_KEY})
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "UPSTREAM_UNAVAILABLE", "message": f"B2B service unavailable: {exc}"},
+            )
+
+    if resp.status_code != 200:
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
+    crumbs: list[dict] = resp.json()
+
+    if not crumbs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "Category not found"},
+        )
+
+    # Orphan detection: a valid chain must start at a root node (parent_id is None).
+    # If the first crumb still has a parent_id, the hierarchy is broken.
+    if crumbs[0].get("parent_id") is not None:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "orphan_node", "message": "category hierarchy is broken"},
+        )
+
+    data = []
+    for i, crumb in enumerate(crumbs):
+        path: str = crumb.get("path", "")
+        slug = path.split("/")[-1] if path else str(crumb.get("id"))
+        data.append({
+            "id": crumb.get("id"),
+            "slug": slug,
+            "name": crumb.get("name"),
+            "url": f"/catalog/{path}" if path else f"/catalog/{crumb.get('id')}",
+            "level": crumb.get("level", i),
+            "is_current": i == len(crumbs) - 1,
+        })
+
+    return JSONResponse(
+        content={
+            "data": data,
+            "meta": {
+                "resolved_via": resolved_via,
+                "category_id": str(resolved_category_id),
+            },
+        },
+        status_code=200,
+    )
 
 
 @products_router.get("/categories/{category_id}/filters")
