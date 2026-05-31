@@ -141,9 +141,61 @@ async def get_products(
     return JSONResponse(content=_transform_products_response(resp.json()), status_code=200)
 
 
+_SKU_FORBIDDEN_FIELDS = frozenset({"cost_price", "reserved_quantity", "stock_quantity", "product_id", "article"})
+
+
+def _transform_product_card(b2b_data: dict) -> dict:
+    """Convert B2B ProductPublicResponse to B2C canonical product card.
+
+    Strips seller-internal fields (cost_price, reserved_quantity) at the B2C boundary.
+    Converts skus[].images array into a single skus[].image string (first by ordering).
+    """
+    skus = []
+    for sku in b2b_data.get("skus", []):
+        images = sku.get("images") or []
+        sorted_images = sorted(images, key=lambda i: i.get("ordering", 0))
+        skus.append({
+            k: v for k, v in {
+                "id": sku.get("id"),
+                "name": sku.get("name"),
+                "price": sku.get("price"),
+                "discount": sku.get("discount", 0),
+                "image": sorted_images[0]["url"] if sorted_images else None,
+                "active_quantity": sku.get("active_quantity"),
+                "characteristics": sku.get("characteristics", []),
+            }.items()
+            if k not in _SKU_FORBIDDEN_FIELDS
+        })
+    return {
+        "id": b2b_data.get("id"),
+        "slug": b2b_data.get("slug"),
+        "title": b2b_data.get("title"),
+        "description": b2b_data.get("description"),
+        "images": [
+            {"url": img.get("url"), "ordering": img.get("ordering")}
+            for img in b2b_data.get("images", [])
+        ],
+        "status": b2b_data.get("status"),
+        "characteristics": b2b_data.get("characteristics", []),
+        "skus": skus,
+    }
+
+
 @products_router.get("/products/{product_id}")
 async def get_product(product_id: UUID):
-    return await _proxy_get(f"/api/v1/public/products/{product_id}")
+    url = f"{settings.service.B2B_URL}/api/v1/public/products/{product_id}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.get(url, headers={"X-Service-Key": settings.service.SERVICE_KEY})
+        except Exception as exc:
+            logger.warning("B2B proxy error for /products/%s: %s", product_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "UPSTREAM_UNAVAILABLE", "message": f"B2B service unavailable: {exc}"},
+            )
+    if resp.status_code != 200:
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    return JSONResponse(content=_transform_product_card(resp.json()), status_code=200)
 
 
 @products_router.get("/products/{product_id}/similar")
