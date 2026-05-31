@@ -83,12 +83,23 @@ def _transform_products_response(b2b_data: dict) -> dict:
 async def get_products(
     request: Request,
     category_id: UUID | None = None,
-    search: str | None = Query(default=None, min_length=3, max_length=255),
+    search: str | None = Query(default=None),
     sort: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
     """Catalog with filters, sort, and pagination; proxies to B2B."""
+    if search is not None:
+        if len(search) < 3:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_REQUEST", "message": "Search query must be at least 3 characters"},
+            )
+        if len(search) > 255:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_REQUEST", "message": "Search query must be at most 255 characters"},
+            )
     if sort is not None and sort not in _VALID_SORTS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
