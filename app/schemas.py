@@ -397,6 +397,35 @@ class PaginatedNotifications(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Banner schemas
+# ---------------------------------------------------------------------------
+
+class BannerSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    image_url: str
+    link: str
+    priority: int
+
+
+class BannerListResponse(BaseModel):
+    items: list[BannerSchema]
+    total_count: int
+
+
+class BannerEventItem(BaseModel):
+    banner_id: UUID
+    event: Literal["impression", "click"]
+    timestamp: datetime
+
+
+class BannerEventsRequest(BaseModel):
+    events: list[BannerEventItem] = Field(min_length=1, max_length=50)
+
+
+# ---------------------------------------------------------------------------
 # B2B Event schemas
 # ---------------------------------------------------------------------------
 
