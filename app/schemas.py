@@ -399,7 +399,7 @@ class OrderResponse(BaseModel):
     subtotal: int
     delivery_cost: int
     total: int
-    address: AddressInOrder
+    address: AddressInOrder | None = None
     payment_method: PaymentMethodInOrder | None = None
     comment: str | None
     cancel_reason: str | None
