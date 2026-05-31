@@ -670,7 +670,7 @@ class OrderService:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 reserve_resp = await client.post(
-                    f"{settings.service.B2B_URL}/api/v1/reserve",
+                    f"{settings.service.B2B_URL}/api/v1/inventory/reserve",
                     json=reserve_payload,
                     headers={"X-Service-Key": settings.service.SERVICE_KEY},
                 )
@@ -847,7 +847,7 @@ class OrderService:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
-                    f"{settings.service.B2B_URL}/api/v1/fulfill",
+                    f"{settings.service.B2B_URL}/api/v1/inventory/fulfill",
                     json={"order_id": str(order_id), "items": fulfill_items},
                     headers={
                         "X-Service-Key": settings.service.SERVICE_KEY,
