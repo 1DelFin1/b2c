@@ -8,6 +8,7 @@ from app.api.routers.orders import orders_v1_router
 from app.api.routers.notifications import notifications_router
 from app.api.routers.b2b_events import b2b_events_router
 from app.api.routers.product_events import product_events_router
+from app.api.routers.admin_orders import admin_orders_router
 from app.api.routers.banners import banners_router
 from app.api.routers.catalog import catalog_router, products_router
 from app.api.routers.collections import collections_router
@@ -22,6 +23,7 @@ main_router.include_router(orders_v1_router)
 main_router.include_router(notifications_router)
 main_router.include_router(b2b_events_router)
 main_router.include_router(product_events_router)
+main_router.include_router(admin_orders_router)
 main_router.include_router(catalog_router)
 main_router.include_router(products_router)
 main_router.include_router(banners_router)

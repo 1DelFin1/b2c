@@ -786,6 +786,106 @@ class OrderService:
             updated_at=order.updated_at,
         )
 
+    # ------------------------------------------------------------------
+    # B2C-13: Fulfill — списание резерва при DELIVERED
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def mark_delivered(
+        cls,
+        session: AsyncSession,
+        order_id: UUID,
+    ) -> dict:
+        """Transition order to DELIVERED and call B2B fulfill (fire-and-forget).
+
+        Canonical flow (b2c-orders-flows.md#b2c-13-fulfill):
+        1. Validate order exists and is in DELIVERING status.
+        2. Set status = DELIVERED, delivered_at = now.
+        3. POST /api/v1/fulfill to B2B (idempotent by order_id).
+        4. If fulfill fails — log the error, keep status DELIVERED.
+           Caller is responsible for async retry (scaffold: logged for now).
+        """
+        order_stmt = select(OrderModel).where(OrderModel.id == order_id)
+        order = await session.scalar(order_stmt)
+        if not order:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+        if order.status != OrderStatus.DELIVERING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "INVALID_STATUS_TRANSITION",
+                    "message": f"Cannot mark as DELIVERED: order is in status {order.status}",
+                    "current_status": order.status,
+                },
+            )
+
+        now = datetime.now(timezone.utc)
+        await session.execute(
+            update(OrderModel)
+            .where(OrderModel.id == order_id)
+            .values(status=OrderStatus.DELIVERED, delivered_at=now)
+        )
+        session.add(OrderStatusHistoryModel(
+            id=uuid4(),
+            order_id=order_id,
+            status=OrderStatus.DELIVERED,
+            reason=None,
+        ))
+        await session.commit()
+
+        # Fetch items for fulfill payload
+        items_stmt = select(OrderItemModel).where(OrderItemModel.order_id == order_id)
+        item_rows = list((await session.scalars(items_stmt)).all())
+
+        fulfill_items = [
+            {"sku_id": str(item.sku_id), "quantity": item.quantity}
+            for item in item_rows
+        ]
+
+        # Call B2B fulfill — fire-and-forget; order stays DELIVERED on failure
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{settings.service.B2B_URL}/api/v1/fulfill",
+                    json={"order_id": str(order_id), "items": fulfill_items},
+                    headers={
+                        "X-Service-Key": settings.service.SERVICE_KEY,
+                        "Content-Type": "application/json",
+                    },
+                )
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "B2B fulfill returned %s for order %s — will need retry: %s",
+                        resp.status_code, order_id, resp.text,
+                    )
+                else:
+                    logger.info("B2B fulfill OK for order %s", order_id)
+        except Exception as exc:
+            # Scaffold: log and leave for async retry; order is already DELIVERED
+            logger.warning(
+                "B2B fulfill failed for order %s (will retry asynchronously): %s",
+                order_id, exc,
+            )
+
+        # Re-fetch updated order for the response
+        order = await session.scalar(select(OrderModel).where(OrderModel.id == order_id))
+        history_stmt = (
+            select(OrderStatusHistoryModel)
+            .where(OrderStatusHistoryModel.order_id == order_id)
+            .order_by(OrderStatusHistoryModel.changed_at)
+        )
+        history_rows = list((await session.scalars(history_stmt)).all())
+
+        address = await session.get(AddressModel, order.address_id) if order.address_id else None
+        payment = (
+            await session.get(PaymentMethodModel, order.payment_method_id)
+            if order.payment_method_id
+            else None
+        )
+
+        return _build_order_response(order, item_rows, history_rows, address=address, payment=payment)
+
     @classmethod
     async def move_order_to_reserved(cls, order_data: dict):
         """RabbitMQ consumer handler — updates CREATED order to PAID (legacy flow)."""
