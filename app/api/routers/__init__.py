@@ -7,7 +7,7 @@ from app.api.routers.favorites import favorites_v1_router
 from app.api.routers.orders import orders_v1_router
 from app.api.routers.notifications import notifications_router
 from app.api.routers.b2b_events import b2b_events_router
-from app.api.routers.catalog import catalog_router
+from app.api.routers.catalog import catalog_router, products_router
 
 main_router = APIRouter()
 
@@ -19,6 +19,7 @@ main_router.include_router(orders_v1_router)
 main_router.include_router(notifications_router)
 main_router.include_router(b2b_events_router)
 main_router.include_router(catalog_router)
+main_router.include_router(products_router)
 
 __all__ = [
     "main_router",
@@ -30,4 +31,5 @@ __all__ = [
     "notifications_router",
     "b2b_events_router",
     "catalog_router",
+    "products_router",
 ]
