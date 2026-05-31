@@ -6,10 +6,14 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
+from sqlalchemy.exc import IntegrityError
+
 from app.api.deps import BuyerDep, SessionDep, get_user_id
 from app.core.config import settings
-from app.schemas import SubscribeRequest
+from app.exceptions import PRODUCT_NOT_FOUND, SUBSCRIPTION_ALREADY_EXISTS
+from app.schemas import SubscribeRequest, SubscriptionResponse
 from app.services.favorites_service import FavoritesService
+from app.services.subscription_service import SubscriptionService
 
 favorites_v1_router = APIRouter(prefix="/api/v1/favorites", tags=["favorites"])
 
@@ -98,18 +102,53 @@ async def remove_favorite(
     await FavoritesService.remove(session, user_id, product_id)
 
 
-@favorites_v1_router.post("/{product_id}/subscribe", status_code=status.HTTP_204_NO_CONTENT)
+@favorites_v1_router.post(
+    "/{product_id}/subscribe",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SubscriptionResponse,
+)
 async def subscribe_favorite(
     product_id: UUID,
+    session: SessionDep,
     payload: BuyerDep,
-    body: SubscribeRequest = Body(default_factory=SubscribeRequest),
+    body: SubscribeRequest = Body(...),
 ):
-    pass
+    """Subscribe to product notifications (IN_STOCK / PRICE_DOWN).
+    user_id from JWT only — IDOR prevention.
+    """
+    user_id = get_user_id(payload)
+
+    # Verify product exists in B2B
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(
+                f"{settings.service.B2B_URL}/api/v1/public/products/{product_id}",
+                headers={"X-Service-Key": settings.service.SERVICE_KEY},
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "B2B_UNAVAILABLE", "message": f"B2B service unavailable: {exc}"},
+        )
+
+    if resp.status_code == 404:
+        raise PRODUCT_NOT_FOUND
+
+    notify_on = [e.value for e in body.notify_on]
+    try:
+        sub = await SubscriptionService.subscribe(session, user_id, product_id, notify_on)
+    except IntegrityError:
+        raise SUBSCRIPTION_ALREADY_EXISTS
+
+    return sub
 
 
 @favorites_v1_router.delete("/{product_id}/subscribe", status_code=status.HTTP_204_NO_CONTENT)
 async def unsubscribe_favorite(
     product_id: UUID,
+    session: SessionDep,
     payload: BuyerDep,
 ):
-    pass
+    """Unsubscribe from product notifications (idempotent — 204 even if not subscribed)."""
+    user_id = get_user_id(payload)
+    await SubscriptionService.unsubscribe(session, user_id, product_id)

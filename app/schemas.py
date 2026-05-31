@@ -391,8 +391,25 @@ class PaginatedReviews(BaseModel):
 # Catalog proxy schemas
 # ---------------------------------------------------------------------------
 
+class NotifyEvent(str, Enum):
+    IN_STOCK = "IN_STOCK"
+    PRICE_DOWN = "PRICE_DOWN"
+
+
 class SubscribeRequest(BaseModel):
-    events: list[Literal["BACK_IN_STOCK", "PRICE_DROP"]] = ["BACK_IN_STOCK", "PRICE_DROP"]
+    notify_on: list[NotifyEvent] = Field(
+        min_length=1,
+        default=[NotifyEvent.IN_STOCK, NotifyEvent.PRICE_DOWN],
+    )
+
+
+class SubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    product_id: UUID
+    notify_on: list[str]
+    created_at: datetime
 
 
 class CatalogFilters(BaseModel):

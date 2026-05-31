@@ -51,3 +51,18 @@ REVIEW_ALREADY_EXISTS = HTTPException(
     status_code=status.HTTP_409_CONFLICT,
     detail="You have already reviewed this product",
 )
+
+SUBSCRIPTION_ALREADY_EXISTS = HTTPException(
+    status_code=status.HTTP_409_CONFLICT,
+    detail={"code": "SUBSCRIPTION_ALREADY_EXISTS", "message": "Вы уже подписаны на уведомления об этом товаре"},
+)
+
+PRODUCT_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND,
+    detail={"code": "PRODUCT_NOT_FOUND", "message": "Товар с указанным идентификатором не найден"},
+)
+
+INVALID_NOTIFY_ON = HTTPException(
+    status_code=status.HTTP_400_BAD_REQUEST,
+    detail={"code": "INVALID_NOTIFY_ON", "message": "Должен быть указан хотя бы один тип уведомления"},
+)
