@@ -18,7 +18,7 @@ from app.core.database import async_session_factory
 from app.models.orders import OrderModel, OrderStatus, OrderItemModel, OrderStatusHistoryModel
 from app.models.addresses import AddressModel
 from app.models.payment_methods import PaymentMethodModel
-from app.schemas import OrderCreateRequest, CartItemStored
+from app.schemas import CheckoutOrderItemOut, CheckoutOrderResponse, CheckoutRequest, OrderCreateRequest, CartItemStored
 
 
 def _compute_order_body_hash(data: OrderCreateRequest, cart_items: list[CartItemStored]) -> str:
@@ -553,6 +553,234 @@ class OrderService:
         if not result:
             return None
         return result.status
+
+    # ------------------------------------------------------------------
+    # Canonical checkout (B2C-9)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def checkout(
+        cls,
+        session: AsyncSession,
+        user_id: UUID,
+        req: CheckoutRequest,
+    ) -> CheckoutOrderResponse:
+        """
+        Canonical checkout:
+          0. Idempotency check
+          1. Validate items (non-empty, qty >= 1)
+          2. GET SKU data from B2B (price, stock, product_id, names)
+          3. Pre-validate availability → 409 if any SKU fails
+          4. POST /api/v1/reserve → 409 if reserve fails, 503 if B2B down
+          5. Create Order + OrderItems with FIXED prices → status PAID
+        """
+        # 0. Idempotency check
+        existing = await session.scalar(
+            select(OrderModel).where(OrderModel.idempotency_key == req.idempotency_key)
+        )
+        if existing:
+            items_rows = list((await session.scalars(
+                select(OrderItemModel).where(OrderItemModel.order_id == existing.id)
+            )).all())
+            return cls._build_checkout_response(existing, items_rows)
+
+        # 2. Fetch SKU data from B2B
+        sku_data: dict[str, dict] = {}  # sku_id_str -> sku_dict
+        for item in req.items:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(
+                        f"{settings.service.B2B_URL}/api/v1/public/skus/{item.sku_id}",
+                        headers={"X-Service-Key": settings.service.SERVICE_KEY},
+                    )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"code": "B2B_UNAVAILABLE", "message": str(exc)},
+                )
+            if resp.status_code >= 500:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"code": "B2B_UNAVAILABLE", "message": "B2B service error"},
+                )
+            if resp.status_code == 404:
+                sku_data[str(item.sku_id)] = None  # type: ignore[assignment]
+            elif resp.status_code < 400:
+                sku_data[str(item.sku_id)] = resp.json()
+
+        # Batch-fetch product titles
+        product_ids = list({
+            str(d["product_id"]) for d in sku_data.values() if d is not None
+        })
+        product_title_map: dict[str, str] = {}
+        if product_ids:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{settings.service.B2B_URL}/api/v1/public/products/batch",
+                        json={"product_ids": product_ids},
+                        headers={"X-Service-Key": settings.service.SERVICE_KEY},
+                    )
+                if resp.status_code == 200:
+                    for p in resp.json():
+                        product_title_map[str(p["id"])] = p.get("title") or ""
+            except Exception:
+                pass  # product title is best-effort; reserve determines availability
+
+        # 3. Pre-validate availability
+        failed: list[dict] = []
+        for item in req.items:
+            sku = sku_data.get(str(item.sku_id))
+            if sku is None:
+                failed.append({
+                    "sku_id": str(item.sku_id),
+                    "requested": item.quantity,
+                    "available": 0,
+                    "reason": "SKU_NOT_FOUND",
+                })
+                continue
+            product_status_val = sku.get("product_status") or sku.get("status") or "ACTIVE"
+            if product_status_val == "BLOCKED":
+                failed.append({"sku_id": str(item.sku_id), "requested": item.quantity, "available": 0, "reason": "PRODUCT_BLOCKED"})
+                continue
+            if product_status_val == "DELETED":
+                failed.append({"sku_id": str(item.sku_id), "requested": item.quantity, "available": 0, "reason": "PRODUCT_DELETED"})
+                continue
+            stock = int(sku.get("active_quantity") or 0)
+            if stock == 0:
+                failed.append({"sku_id": str(item.sku_id), "requested": item.quantity, "available": 0, "reason": "OUT_OF_STOCK"})
+            elif stock < item.quantity:
+                failed.append({"sku_id": str(item.sku_id), "requested": item.quantity, "available": stock, "reason": "INSUFFICIENT_STOCK"})
+
+        if failed:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "RESERVE_FAILED", "message": "Не удалось зарезервировать товары", "failed_items": failed},
+            )
+
+        # 4. Reserve (all-or-nothing)
+        reserve_payload = {
+            "idempotency_key": str(req.idempotency_key),
+            "items": [{"sku_id": str(i.sku_id), "quantity": i.quantity} for i in req.items],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                reserve_resp = await client.post(
+                    f"{settings.service.B2B_URL}/api/v1/reserve",
+                    json=reserve_payload,
+                    headers={"X-Service-Key": settings.service.SERVICE_KEY},
+                )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "B2B_UNAVAILABLE", "message": str(exc)},
+            )
+
+        if reserve_resp.status_code >= 500:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "B2B_UNAVAILABLE", "message": "B2B reserve unavailable"},
+            )
+        if reserve_resp.status_code == 409:
+            body = reserve_resp.json()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "RESERVE_FAILED",
+                    "message": "Не удалось зарезервировать товары",
+                    "failed_items": body.get("failed_items", []),
+                },
+            )
+        if reserve_resp.status_code >= 400:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "B2B_UNAVAILABLE", "message": "B2B reserve error"},
+            )
+
+        # 5. Create order with FIXED prices
+        now = datetime.now(timezone.utc)
+        order_id = uuid4()
+        total_amount = sum(
+            int((sku_data[str(i.sku_id)] or {}).get("price") or 0) * i.quantity
+            for i in req.items
+        )
+
+        order = OrderModel(
+            id=order_id,
+            user_id=user_id,
+            status=OrderStatus.PAID,
+            address_id=None,
+            delivery_address=req.delivery_address,
+            comment=None,
+            subtotal=total_amount,
+            delivery_cost=0,
+            total=total_amount,
+            idempotency_key=req.idempotency_key,
+            paid_at=now,
+        )
+        session.add(order)
+        await session.flush()
+
+        order_items: list[OrderItemModel] = []
+        for item in req.items:
+            sku = sku_data[str(item.sku_id)] or {}
+            price = int(sku.get("price") or 0)
+            product_id_str = str(sku.get("product_id") or "")
+            product_title = product_title_map.get(product_id_str) or sku.get("name") or ""
+            sku_name = sku.get("name") or ""
+
+            oi = OrderItemModel(
+                id=uuid4(),
+                order_id=order_id,
+                sku_id=item.sku_id,
+                product_id=UUID(product_id_str) if product_id_str else uuid4(),
+                name=product_title,
+                product_title=product_title,
+                sku_name=sku_name,
+                quantity=item.quantity,
+                unit_price=price,
+                line_total=price * item.quantity,
+                seller_id=None,
+            )
+            session.add(oi)
+            order_items.append(oi)
+
+        session.add(OrderStatusHistoryModel(
+            id=uuid4(), order_id=order_id, status=OrderStatus.PAID,
+            reason="Mock payment — paid immediately",
+        ))
+        await session.commit()
+        await session.refresh(order)
+
+        return cls._build_checkout_response(order, order_items)
+
+    @classmethod
+    def _build_checkout_response(
+        cls,
+        order: OrderModel,
+        items: list[OrderItemModel],
+    ) -> CheckoutOrderResponse:
+        return CheckoutOrderResponse(
+            id=order.id,
+            status=order.status,
+            items=[
+                CheckoutOrderItemOut(
+                    id=oi.id,
+                    sku_id=oi.sku_id,
+                    product_id=oi.product_id,
+                    product_title=oi.product_title or oi.name or "",
+                    sku_name=oi.sku_name or oi.name or "",
+                    quantity=oi.quantity,
+                    unit_price=oi.unit_price,
+                    line_total=oi.line_total,
+                )
+                for oi in items
+            ],
+            total_amount=order.total,
+            delivery_address=getattr(order, "delivery_address", None),
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+        )
 
     @classmethod
     async def move_order_to_reserved(cls, order_data: dict):

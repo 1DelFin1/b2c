@@ -284,6 +284,49 @@ class FavoritesResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Checkout schemas (canonical B2C-9 flow)
+# ---------------------------------------------------------------------------
+
+class CheckoutRequestItem(BaseModel):
+    sku_id: UUID
+    quantity: int = Field(ge=1)
+
+
+class CheckoutRequest(BaseModel):
+    idempotency_key: UUID
+    items: list[CheckoutRequestItem] = Field(min_length=1)
+    delivery_address: str | None = None
+
+
+class FailedReserveItem(BaseModel):
+    sku_id: UUID
+    requested: int | None = None
+    available: int | None = None
+    reason: str  # OUT_OF_STOCK | INSUFFICIENT_STOCK | PRODUCT_BLOCKED | PRODUCT_DELETED | SKU_NOT_FOUND
+
+
+class CheckoutOrderItemOut(BaseModel):
+    id: UUID
+    sku_id: UUID
+    product_id: UUID
+    product_title: str
+    sku_name: str
+    quantity: int
+    unit_price: int
+    line_total: int
+
+
+class CheckoutOrderResponse(BaseModel):
+    id: UUID
+    status: str
+    items: list[CheckoutOrderItemOut]
+    total_amount: int
+    delivery_address: str | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
 # Order schemas
 # ---------------------------------------------------------------------------
 

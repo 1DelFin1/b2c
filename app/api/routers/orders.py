@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from app.api.deps import SessionDep, get_current_active_auth_buyer, get_user_id
 from app.schemas import (
     CancelOrderRequest,
+    CheckoutOrderResponse,
+    CheckoutRequest,
     OrderCreateRequest,
     OrderResponse,
     PaginatedOrders,
@@ -42,37 +44,19 @@ async def list_orders(
     )
 
 
-@orders_v1_router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
+@orders_v1_router.post("", response_model=CheckoutOrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(
-    request: Request,
     session: SessionDep,
-    body: OrderCreateRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    body: CheckoutRequest,
     payload: dict = Depends(get_current_active_auth_buyer),
 ):
+    """
+    Canonical checkout (B2C-9):
+    idempotency_key in body, items in body, prices fixed from B2B.
+    Returns 201 (new) or 201 (idempotency replay) with PAID order.
+    """
     user_id = get_user_id(payload)
-
-    try:
-        idem_uuid = UUID(idempotency_key)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Idempotency-Key must be a valid UUID",
-        )
-
-    cart_items = await CartService.get_items(str(user_id))
-
-    order_dict = await OrderService.create(
-        session=session,
-        user_id=user_id,
-        data=body,
-        cart_items=cart_items,
-        idempotency_key=idem_uuid,
-    )
-
-    await CartService.clear(str(user_id))
-
-    return order_dict
+    return await OrderService.checkout(session=session, user_id=user_id, req=body)
 
 
 @orders_v1_router.get("/{order_id}", response_model=OrderResponse)
