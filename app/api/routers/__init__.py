@@ -9,6 +9,7 @@ from app.api.routers.notifications import notifications_router
 from app.api.routers.b2b_events import b2b_events_router
 from app.api.routers.banners import banners_router
 from app.api.routers.catalog import catalog_router, products_router
+from app.api.routers.collections import collections_router
 
 main_router = APIRouter()
 
@@ -22,6 +23,7 @@ main_router.include_router(b2b_events_router)
 main_router.include_router(catalog_router)
 main_router.include_router(products_router)
 main_router.include_router(banners_router)
+main_router.include_router(collections_router)
 
 __all__ = [
     "main_router",

@@ -397,6 +397,50 @@ class PaginatedNotifications(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Collection schemas
+# ---------------------------------------------------------------------------
+
+class CollectionSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    description: str | None = None
+    cover_image_url: str | None = None
+    target_url: str | None = None
+    priority: int
+    start_date: date | None = None
+
+
+class CollectionsMetadata(BaseModel):
+    total_count: int
+    limit: int
+    offset: int
+
+
+class CollectionsResponse(BaseModel):
+    metadata: CollectionsMetadata
+    collections: list[CollectionSchema]
+
+
+class CollectionProductCard(BaseModel):
+    """Enriched product card returned inside a collection."""
+    id: UUID
+    title: str
+    slug: str | None = None
+    price: int | None = None
+    in_stock: bool
+    images: list[dict] = []
+
+
+class CollectionProductsResponse(BaseModel):
+    collection_title: str
+    total_products: int
+    items: list[CollectionProductCard]
+    unavailable_ids: list[UUID] = []
+
+
+# ---------------------------------------------------------------------------
 # Banner schemas
 # ---------------------------------------------------------------------------
 
