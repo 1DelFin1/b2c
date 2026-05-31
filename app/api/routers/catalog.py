@@ -204,9 +204,38 @@ async def get_similar_products(
     limit: Annotated[int, Query(ge=1, le=20)] = 8,
     offset: int = Query(default=0, ge=0),
 ):
-    return await _proxy_get(
-        f"/api/v1/public/products/{product_id}/similar",
-        params={"limit": limit, "offset": offset},
+    url = f"{settings.service.B2B_URL}/api/v1/public/products/{product_id}/similar"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.get(
+                url,
+                params={"limit": limit + offset},
+                headers={"X-Service-Key": settings.service.SERVICE_KEY},
+            )
+        except Exception as exc:
+            logger.warning("B2B proxy error for /products/%s/similar: %s", product_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "UPSTREAM_UNAVAILABLE", "message": f"B2B service unavailable: {exc}"},
+            )
+    if resp.status_code != 200:
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    b2b_items = resp.json() if isinstance(resp.json(), list) else []
+    page = b2b_items[offset: offset + limit]
+    items = [
+        {
+            "id": item.get("id"),
+            "title": item.get("title"),
+            "image": item.get("cover_image"),
+            "price": item.get("min_price", 0),
+            "in_stock": True,
+            "is_in_cart": False,
+        }
+        for item in page
+    ]
+    return JSONResponse(
+        content={"items": items, "total_count": len(b2b_items), "limit": limit, "offset": offset},
+        status_code=200,
     )
 
 
