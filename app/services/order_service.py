@@ -433,11 +433,15 @@ class OrderService:
         if order.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
 
-        cancellable = {OrderStatus.CREATED, OrderStatus.PAID, OrderStatus.ASSEMBLING}
+        cancellable = {OrderStatus.CREATED, OrderStatus.PAID}
         if order.status not in cancellable:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Order in status {order.status!r} cannot be cancelled",
+                detail={
+                    "code": "CANCEL_NOT_ALLOWED",
+                    "message": f"Отмена невозможна: заказ в статусе {order.status}",
+                    "current_status": order.status,
+                },
             )
 
         cancel_reason_text = reason or "Cancelled by buyer"
