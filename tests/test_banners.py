@@ -44,7 +44,7 @@ _TIMESTAMP = _NOW.isoformat()
 
 @pytest.mark.asyncio
 async def test_active_banners_returned_sorted_by_priority(ac):
-    """GET /api/v1/home/banners returns active banners sorted by priority asc."""
+    """GET /api/v1/catalog/banners returns active banners sorted by priority asc."""
     # Service returns already-sorted list (DB ORDER BY priority ASC)
     sorted_banners = [_BANNER_HIGH, _BANNER_MID, _BANNER_LOW]
 
@@ -52,7 +52,7 @@ async def test_active_banners_returned_sorted_by_priority(ac):
         "app.api.routers.banners.BannerService.get_active",
         new=AsyncMock(return_value=sorted_banners),
     ):
-        resp = await ac.get("/api/v1/home/banners")
+        resp = await ac.get("/api/v1/catalog/banners")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -71,13 +71,13 @@ async def test_active_banners_returned_sorted_by_priority(ac):
 
 @pytest.mark.asyncio
 async def test_banners_no_auth_required(ac):
-    """GET /api/v1/home/banners works without any Authorization header."""
+    """GET /api/v1/catalog/banners works without any Authorization header."""
     with patch(
         "app.api.routers.banners.BannerService.get_active",
         new=AsyncMock(return_value=[_BANNER_HIGH]),
     ):
         # Deliberately no Authorization header
-        resp = await ac.get("/api/v1/home/banners")
+        resp = await ac.get("/api/v1/catalog/banners")
 
     assert resp.status_code == 200
 
@@ -89,7 +89,7 @@ async def test_no_active_banners_returns_200_empty(ac):
         "app.api.routers.banners.BannerService.get_active",
         new=AsyncMock(return_value=[]),
     ):
-        resp = await ac.get("/api/v1/home/banners")
+        resp = await ac.get("/api/v1/catalog/banners")
 
     assert resp.status_code == 200
     body = resp.json()

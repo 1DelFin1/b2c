@@ -9,7 +9,7 @@ from app.services.banner_service import BannerService
 banners_router = APIRouter(tags=["banners"])
 
 
-@banners_router.get("/api/v1/home/banners", response_model=BannerListResponse)
+@banners_router.get("/api/v1/catalog/banners", response_model=BannerListResponse)
 async def get_home_banners(session: SessionDep) -> BannerListResponse:
     """Public — no auth required. Returns active banners sorted by priority."""
     banners = await BannerService.get_active(session)

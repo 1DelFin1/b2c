@@ -472,11 +472,6 @@ class Collection(BaseModel):
     products: list[CatalogProductCard] = []
 
 
-@catalog_router.get("/banners", response_model=list[Banner])
-async def get_banners():
-    return []
-
-
 @catalog_router.get("/collections", response_model=list[Collection])
 async def get_collections():
     return []
