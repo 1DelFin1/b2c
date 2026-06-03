@@ -42,7 +42,7 @@ async def _b2b_batch_products(product_ids: list[str]) -> list[dict]:
     return resp.json()
 
 
-@collections_router.get("/api/v1/main/collections", response_model=CollectionsResponse)
+@collections_router.get("/api/v1/catalog/collections", response_model=CollectionsResponse)
 async def list_collections(
     session: SessionDep,
     limit: int = Query(default=10, ge=1, le=50),

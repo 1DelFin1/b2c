@@ -465,13 +465,3 @@ class Banner(BaseModel):
     active_to: datetime | None = None
 
 
-class Collection(BaseModel):
-    id: UUID
-    name: str
-    description: str | None = None
-    products: list[CatalogProductCard] = []
-
-
-@catalog_router.get("/collections", response_model=list[Collection])
-async def get_collections():
-    return []

@@ -63,7 +63,7 @@ def _mock_b2b_batch(products: list[dict]):
 
 @pytest.mark.asyncio
 async def test_collections_list_returns_metadata_without_products(ac):
-    """GET /api/v1/main/collections returns metadata + collection list — no products inside."""
+    """GET /api/v1/catalog/collections returns metadata + collection list — no products inside."""
     col1 = _make_collection(COLLECTION_ID, "Хиты продаж", priority=10)
     col2 = _make_collection(COLLECTION_ID_2, "Новинки", priority=20)
 
@@ -71,7 +71,7 @@ async def test_collections_list_returns_metadata_without_products(ac):
         "app.api.routers.collections.CollectionService.list_active",
         new=AsyncMock(return_value=([col1, col2], 2)),
     ):
-        resp = await ac.get("/api/v1/main/collections")
+        resp = await ac.get("/api/v1/catalog/collections")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -100,7 +100,7 @@ async def test_collections_list_empty_returns_200(ac):
         "app.api.routers.collections.CollectionService.list_active",
         new=AsyncMock(return_value=([], 0)),
     ):
-        resp = await ac.get("/api/v1/main/collections")
+        resp = await ac.get("/api/v1/catalog/collections")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -241,7 +241,7 @@ async def test_collections_pagination(ac):
         "app.api.routers.collections.CollectionService.list_active",
         new=AsyncMock(return_value=([], 42)),
     ) as mock_list:
-        resp = await ac.get("/api/v1/main/collections?limit=5&offset=10")
+        resp = await ac.get("/api/v1/catalog/collections?limit=5&offset=10")
 
     assert resp.status_code == 200
     body = resp.json()
