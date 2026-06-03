@@ -135,42 +135,54 @@ async def get_products(
     return JSONResponse(content=_transform_products_response(resp.json()), status_code=200)
 
 
-_SKU_FORBIDDEN_FIELDS = frozenset({"cost_price", "reserved_quantity", "stock_quantity", "product_id", "article"})
+def _chars_to_attrs(characteristics: list) -> dict:
+    """Convert B2B [{id, name, value}] array to B2C {name: value} attributes object."""
+    return {c["name"]: c["value"] for c in characteristics if "name" in c and "value" in c}
 
 
 def _transform_product_card(b2b_data: dict) -> dict:
-    """Convert B2B ProductPublicResponse to B2C canonical product card.
+    """Convert B2B ProductPublicResponse to B2C CatalogProductDetail.
 
-    Strips seller-internal fields (cost_price, reserved_quantity) at the B2C boundary.
-    Converts skus[].images array into a single skus[].image string (first by ordering).
+    Strips seller-internal fields at the B2C boundary.
+    Maps characteristics[] → attributes {}, active_quantity → available_quantity.
     """
+    b2b_skus = b2b_data.get("skus", [])
+
     skus = []
-    for sku in b2b_data.get("skus", []):
+    for sku in b2b_skus:
         images = sku.get("images") or []
         sorted_images = sorted(images, key=lambda i: i.get("ordering", 0))
+        discount = sku.get("discount") or 0
         skus.append({
-            k: v for k, v in {
-                "id": sku.get("id"),
-                "name": sku.get("name"),
-                "price": sku.get("price"),
-                "discount": sku.get("discount", 0),
-                "image": sorted_images[0]["url"] if sorted_images else None,
-                "active_quantity": sku.get("active_quantity"),
-                "characteristics": sku.get("characteristics", []),
-            }.items()
-            if k not in _SKU_FORBIDDEN_FIELDS
+            "id": sku.get("id"),
+            "name": sku.get("name"),
+            "sku_code": sku.get("article"),
+            "price": sku.get("price"),
+            "old_price": (sku["price"] + discount) if discount > 0 and sku.get("price") is not None else None,
+            "available_quantity": sku.get("active_quantity"),
+            "attributes": _chars_to_attrs(sku.get("characteristics") or []),
+            "images": [
+                {"id": img.get("id"), "url": img.get("url"), "ordering": img.get("ordering", 0)}
+                for img in sorted_images
+            ],
         })
+
+    in_stock_prices = [s["price"] for s in skus if (s.get("available_quantity") or 0) > 0 and s.get("price") is not None]
+    min_price = min(in_stock_prices) if in_stock_prices else None
+    has_stock = bool(in_stock_prices)
+
     return {
         "id": b2b_data.get("id"),
-        "slug": b2b_data.get("slug"),
         "name": b2b_data.get("title"),
-        "description": b2b_data.get("description"),
+        "slug": b2b_data.get("slug"),
+        "min_price": min_price,
+        "has_stock": has_stock,
         "images": [
-            {"url": img.get("url"), "ordering": img.get("ordering")}
-            for img in b2b_data.get("images", [])
+            {"id": img.get("id"), "url": img.get("url"), "ordering": img.get("ordering", 0)}
+            for img in sorted(b2b_data.get("images", []), key=lambda i: i.get("ordering", 0))
         ],
-        "status": b2b_data.get("status"),
-        "characteristics": b2b_data.get("characteristics", []),
+        "description": b2b_data.get("description"),
+        "attributes": _chars_to_attrs(b2b_data.get("characteristics") or []),
         "skus": skus,
     }
 
