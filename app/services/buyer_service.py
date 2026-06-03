@@ -49,7 +49,7 @@ class BuyerService:
             await session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Email already registered",
+                detail={"code": "EMAIL_ALREADY_REGISTERED", "message": "Email already registered"},
             )
         await session.refresh(buyer)
         return buyer

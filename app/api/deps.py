@@ -46,13 +46,13 @@ def _decode_token(token: str) -> dict:
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
+            detail={"code": "TOKEN_EXPIRED", "message": "Token has expired"},
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
+            detail={"code": "INVALID_TOKEN", "message": "Invalid token"},
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -63,14 +63,14 @@ def get_user_id(payload: dict) -> UUID:
     if not raw:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing user identifier",
+            detail={"code": "UNAUTHORIZED", "message": "Token missing user identifier"},
         )
     try:
         return UUID(str(raw))
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user identifier in token",
+            detail={"code": "UNAUTHORIZED", "message": "Invalid user identifier in token"},
         )
 
 
@@ -80,7 +80,7 @@ async def get_current_auth_user(request: Request) -> dict:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail={"code": "UNAUTHORIZED", "message": "Not authenticated"},
             headers={"WWW-Authenticate": "Bearer"},
         )
     return _decode_token(token)
@@ -92,7 +92,7 @@ async def get_current_active_auth_buyer(request: Request) -> dict:
     if payload.get("account_type") != "buyer":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Buyer account required",
+            detail={"code": "FORBIDDEN", "message": "Buyer account required"},
         )
     return payload
 
@@ -118,7 +118,7 @@ async def verify_service_key(x_service_key: str | None = Header(default=None, al
     if not x_service_key or x_service_key != settings.service.SERVICE_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing service key",
+            detail={"code": "UNAUTHORIZED", "message": "Invalid or missing service key"},
         )
     return x_service_key
 

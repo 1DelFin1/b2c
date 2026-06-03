@@ -70,7 +70,7 @@ class ReviewService:
         if not has_purchased:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only review products you have purchased",
+                detail={"code": "FORBIDDEN", "message": "You can only review products you have purchased"},
             )
 
         review = ReviewModel(
@@ -113,7 +113,7 @@ class ReviewService:
         if review.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only update your own reviews",
+                detail={"code": "FORBIDDEN", "message": "You can only update your own reviews"},
             )
 
         update_data = data.model_dump(exclude_unset=True)
@@ -134,7 +134,7 @@ class ReviewService:
         if review.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only delete your own reviews",
+                detail={"code": "FORBIDDEN", "message": "You can only delete your own reviews"},
             )
 
         await session.delete(review)

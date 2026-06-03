@@ -2,54 +2,54 @@ from fastapi import HTTPException, status
 
 BUYER_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND,
-    detail="Buyer not found",
+    detail={"code": "BUYER_NOT_FOUND", "message": "Buyer not found"},
 )
 
 BUYER_ALREADY_EXISTS = HTTPException(
     status_code=status.HTTP_409_CONFLICT,
-    detail="A buyer with this email already exists",
+    detail={"code": "BUYER_ALREADY_EXISTS", "message": "A buyer with this email already exists"},
 )
 
 UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Not authenticated",
+    detail={"code": "UNAUTHORIZED", "message": "Not authenticated"},
     headers={"WWW-Authenticate": "Bearer"},
 )
 
 INVALID_TOKEN = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Invalid or expired token",
+    detail={"code": "INVALID_TOKEN", "message": "Invalid or expired token"},
     headers={"WWW-Authenticate": "Bearer"},
 )
 
 INCORRECT_DATA = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Incorrect email or password",
+    detail={"code": "INCORRECT_CREDENTIALS", "message": "Incorrect email or password"},
 )
 
 ADDRESS_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND,
-    detail="Address not found",
+    detail={"code": "ADDRESS_NOT_FOUND", "message": "Address not found"},
 )
 
 PAYMENT_METHOD_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND,
-    detail="Payment method not found",
+    detail={"code": "PAYMENT_METHOD_NOT_FOUND", "message": "Payment method not found"},
 )
 
 ORDER_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND,
-    detail="Order not found",
+    detail={"code": "ORDER_NOT_FOUND", "message": "Order not found"},
 )
 
 REVIEW_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND,
-    detail="Review not found",
+    detail={"code": "REVIEW_NOT_FOUND", "message": "Review not found"},
 )
 
 REVIEW_ALREADY_EXISTS = HTTPException(
     status_code=status.HTTP_409_CONFLICT,
-    detail="You have already reviewed this product",
+    detail={"code": "REVIEW_ALREADY_EXISTS", "message": "You have already reviewed this product"},
 )
 
 SUBSCRIPTION_ALREADY_EXISTS = HTTPException(

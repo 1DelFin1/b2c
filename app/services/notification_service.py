@@ -63,7 +63,7 @@ class NotificationService:
         if not notification:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Notification not found",
+                detail={"code": "NOT_FOUND", "message": "Notification not found"},
             )
         notification.is_read = True
         await session.commit()

@@ -207,9 +207,9 @@ class OrderService:
         order_stmt = select(OrderModel).where(OrderModel.id == order_id)
         order = await session.scalar(order_stmt)
         if not order:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ORDER_NOT_FOUND", "message": "Order not found"})
         if order.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ORDER_NOT_FOUND", "message": "Order not found"})
 
         items_stmt = select(OrderItemModel).where(OrderItemModel.order_id == order_id)
         item_rows = list((await session.scalars(items_stmt)).all())
@@ -247,7 +247,7 @@ class OrderService:
             if existing.request_body_hash and existing.request_body_hash != body_hash:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Idempotency key reuse with different request body",
+                    detail={"code": "IDEMPOTENCY_CONFLICT", "message": "Idempotency key reuse with different request body"},
                 )
             items_stmt = select(OrderItemModel).where(OrderItemModel.order_id == existing.id)
             item_rows = list((await session.scalars(items_stmt)).all())
@@ -313,7 +313,7 @@ class OrderService:
                 if reserve_resp.status_code == 409:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail="Insufficient stock for one or more items",
+                        detail={"code": "INSUFFICIENT_STOCK", "message": "Insufficient stock for one or more items"},
                     )
                 if reserve_resp.status_code >= 400:
                     logger.warning(
@@ -429,9 +429,9 @@ class OrderService:
         order_stmt = select(OrderModel).where(OrderModel.id == order_id)
         order = await session.scalar(order_stmt)
         if not order:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ORDER_NOT_FOUND", "message": "Order not found"})
         if order.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ORDER_NOT_FOUND", "message": "Order not found"})
 
         cancellable = {OrderStatus.CREATED, OrderStatus.PAID}
         if order.status not in cancellable:
@@ -822,7 +822,7 @@ class OrderService:
         order_stmt = select(OrderModel).where(OrderModel.id == order_id)
         order = await session.scalar(order_stmt)
         if not order:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ORDER_NOT_FOUND", "message": "Order not found"})
 
         if order.status != OrderStatus.DELIVERING:
             raise HTTPException(
@@ -910,7 +910,7 @@ class OrderService:
             if order_status != OrderStatus.CREATED or not order_status:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Order is not in CREATED state",
+                    detail={"code": "INVALID_STATUS", "message": "Order is not in CREATED state"},
                 )
 
             stmt = (

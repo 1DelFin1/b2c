@@ -133,7 +133,7 @@ class CartService:
         if not found:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Item not found in cart",
+                detail={"code": "CART_ITEM_NOT_FOUND", "message": "Item not found in cart"},
             )
 
         await cls._save_raw(identity, raw_items)
