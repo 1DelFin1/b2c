@@ -61,10 +61,10 @@ def _transform_products_response(b2b_data: dict) -> dict:
     items = [
         {
             "id": item.get("id"),
-            "title": item.get("title"),
-            "image": item.get("cover_image"),
-            "price": item.get("min_price", 0),
-            "in_stock": True,
+            "name": item.get("title"),
+            "images": [{"url": item["cover_image"], "ordering": 0}] if item.get("cover_image") else [],
+            "min_price": item.get("min_price", 0),
+            "has_stock": bool(item.get("min_price")),
             "is_in_cart": False,
         }
         for item in b2b_data.get("items", [])
@@ -77,9 +77,9 @@ def _transform_products_response(b2b_data: dict) -> dict:
     }
 
 
-# ── Canonical products endpoints (GET /api/v1/products) ──────────────────────
+# ── Canonical products endpoints (GET /api/v1/catalog/products) ──────────────
 
-@products_router.get("/products")
+@catalog_router.get("/products")
 async def get_products(
     request: Request,
     category_id: UUID | None = None,
@@ -169,7 +169,7 @@ def _transform_product_card(b2b_data: dict) -> dict:
     return {
         "id": b2b_data.get("id"),
         "slug": b2b_data.get("slug"),
-        "title": b2b_data.get("title"),
+        "name": b2b_data.get("title"),
         "description": b2b_data.get("description"),
         "images": [
             {"url": img.get("url"), "ordering": img.get("ordering")}
@@ -181,7 +181,7 @@ def _transform_product_card(b2b_data: dict) -> dict:
     }
 
 
-@products_router.get("/products/{product_id}")
+@catalog_router.get("/products/{product_id}")
 async def get_product(product_id: UUID):
     url = f"{settings.service.B2B_URL}/api/v1/public/products/{product_id}"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -198,7 +198,7 @@ async def get_product(product_id: UUID):
     return JSONResponse(content=_transform_product_card(resp.json()), status_code=200)
 
 
-@products_router.get("/products/{product_id}/similar")
+@catalog_router.get("/products/{product_id}/similar")
 async def get_similar_products(
     product_id: UUID,
     limit: Annotated[int, Query(ge=1, le=20)] = 8,
@@ -225,10 +225,10 @@ async def get_similar_products(
     items = [
         {
             "id": item.get("id"),
-            "title": item.get("title"),
-            "image": item.get("cover_image"),
-            "price": item.get("min_price", 0),
-            "in_stock": True,
+            "name": item.get("title"),
+            "images": [{"url": item["cover_image"], "ordering": 0}] if item.get("cover_image") else [],
+            "min_price": item.get("min_price", 0),
+            "has_stock": bool(item.get("min_price")),
             "is_in_cart": False,
         }
         for item in page
@@ -380,27 +380,6 @@ async def get_catalog_facets(request: Request, category_id: UUID = Query(...)):
     """Facet counts per characteristic value; proxies to B2B (B2B-7)."""
     params = dict(request.query_params)
     return await _proxy_get("/api/v1/public/catalog/facets", params=params)
-
-
-# ── Legacy catalog-prefixed endpoints (kept for backward compat) ─────────────
-
-@catalog_router.get("/products")
-async def proxy_products(request: Request):
-    params = dict(request.query_params)
-    return await _proxy_get("/api/v1/public/products", params=params)
-
-
-@catalog_router.get("/products/{product_id}")
-async def proxy_product(product_id: UUID):
-    return await _proxy_get(f"/api/v1/public/products/{product_id}")
-
-
-@catalog_router.get("/products/{product_id}/similar")
-async def proxy_similar_products(
-    product_id: UUID,
-    limit: Annotated[int, Query(ge=1, le=50)] = 10,
-):
-    return await _proxy_get(f"/api/v1/public/products/{product_id}/similar", params={"limit": limit})
 
 
 def _transform_categories_path(categories: list) -> list:
