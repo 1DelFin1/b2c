@@ -4,8 +4,9 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from uuid import UUID
 
-from app.api.deps import SessionDep, get_current_active_auth_buyer, get_user_id
+from app.api.deps import SessionDep, get_current_active_auth_buyer, get_user_id, get_optional_user_id
 from app.schemas import (
     CancelOrderRequest,
     CheckoutOrderResponse,
@@ -46,17 +47,28 @@ async def list_orders(
 
 @orders_v1_router.post("", response_model=CheckoutOrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(
+    request: Request,
     session: SessionDep,
-    body: CheckoutRequest,
+    body: OrderCreateRequest,
+    idempotency_key: UUID = Header(..., alias="Idempotency-Key"),
     payload: dict = Depends(get_current_active_auth_buyer),
 ):
     """
     Canonical checkout (B2C-9):
-    idempotency_key in body, items in body, prices fixed from B2B.
-    Returns 201 (new) or 201 (idempotency replay) with PAID order.
+    Idempotency-Key in header, OrderCreateRequest in body.
+    Items come from items_snapshot (if provided) or from the buyer's cart.
+    Prices are always fixed from B2B. Returns 201 PAID order.
     """
     user_id = get_user_id(payload)
-    return await OrderService.checkout(session=session, user_id=user_id, req=body)
+    identity = str(user_id)
+    cart_items = await CartService.get_items(identity) if not body.items_snapshot else []
+    return await OrderService.checkout(
+        session=session,
+        user_id=user_id,
+        idempotency_key=idempotency_key,
+        data=body,
+        cart_items=cart_items,
+    )
 
 
 @orders_v1_router.get("/{order_id}", response_model=OrderResponse)

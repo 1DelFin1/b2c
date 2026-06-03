@@ -28,13 +28,15 @@ IDEMPOTENCY_KEY = uuid4()
 _PAYLOAD = {"sub": str(USER_ID), "account_type": "buyer", "email": "buyer@test.com"}
 _NOW = datetime.now(timezone.utc)
 
+_IDEMPOTENCY_HEADER = {"Idempotency-Key": str(IDEMPOTENCY_KEY)}
+
 _CHECKOUT_BODY = {
-    "idempotency_key": str(IDEMPOTENCY_KEY),
-    "items": [
-        {"sku_id": str(SKU_ID_1), "quantity": 2},
-        {"sku_id": str(SKU_ID_2), "quantity": 1},
+    "address_id": str(uuid4()),
+    "payment_method_id": str(uuid4()),
+    "items_snapshot": [
+        {"sku_id": str(SKU_ID_1), "quantity": 2, "unit_price": 12999_00},
+        {"sku_id": str(SKU_ID_2), "quantity": 1, "unit_price": 899_00},
     ],
-    "delivery_address": "г. Москва, ул. Тверская, д. 1",
 }
 
 
@@ -167,7 +169,7 @@ async def test_checkout_creates_paid_order_with_fixed_prices(ac):
             delivery_address="г. Москва, ул. Тверская, д. 1",
             created_at=_NOW,
         )
-        resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY)
+        resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY, headers=_IDEMPOTENCY_HEADER)
 
     assert resp.status_code == 201
     body = resp.json()
@@ -211,10 +213,11 @@ async def test_checkout_creates_order_directly(ac):
         resp = await ac.post(
             "/api/v1/orders",
             json={
-                "idempotency_key": str(uuid4()),
-                "items": [{"sku_id": str(SKU_ID_1), "quantity": 2}],
-                "delivery_address": "addr",
+                "address_id": str(uuid4()),
+                "payment_method_id": str(uuid4()),
+                "items_snapshot": [{"sku_id": str(SKU_ID_1), "quantity": 2, "unit_price": 12999_00}],
             },
+            headers={"Idempotency-Key": str(uuid4())},
         )
 
     assert resp.status_code == 201
@@ -238,7 +241,7 @@ async def test_partial_reserve_failure_returns_409(ac):
         "app.api.routers.orders.OrderService.checkout",
         new=AsyncMock(side_effect=exc),
     ):
-        resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY)
+        resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY, headers=_IDEMPOTENCY_HEADER)
 
     assert resp.status_code == 409
     body = resp.json()
@@ -271,9 +274,9 @@ async def test_idempotency_returns_existing_order(ac):
     checkout_mock = AsyncMock(return_value=existing_order)
     with patch("app.api.routers.orders.OrderService.checkout", new=checkout_mock):
         # First call
-        resp1 = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY)
+        resp1 = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY, headers=_IDEMPOTENCY_HEADER)
         # Second call with same idempotency_key
-        resp2 = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY)
+        resp2 = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY, headers=_IDEMPOTENCY_HEADER)
 
     assert resp1.status_code == 201
     assert resp2.status_code == 201
@@ -296,30 +299,28 @@ async def test_b2b_unavailable_returns_503(ac):
         "app.api.routers.orders.OrderService.checkout",
         new=AsyncMock(side_effect=exc),
     ):
-        resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY)
+        resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY, headers=_IDEMPOTENCY_HEADER)
 
     assert resp.status_code == 503
     assert resp.json()["code"] == "B2B_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
-async def test_empty_items_returns_422(ac):
-    """Empty items list → 422 (Pydantic minItems=1)."""
+async def test_missing_idempotency_key_returns_422(ac):
+    """Missing Idempotency-Key header → 422."""
     resp = await ac.post(
         "/api/v1/orders",
-        json={"idempotency_key": str(uuid4()), "items": []},
+        json={"address_id": str(uuid4()), "payment_method_id": str(uuid4())},
     )
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_invalid_quantity_returns_422(ac):
-    """quantity < 1 → 422."""
+async def test_missing_required_body_fields_returns_422(ac):
+    """Missing address_id or payment_method_id → 422."""
     resp = await ac.post(
         "/api/v1/orders",
-        json={
-            "idempotency_key": str(uuid4()),
-            "items": [{"sku_id": str(SKU_ID_1), "quantity": 0}],
-        },
+        json={},
+        headers={"Idempotency-Key": str(uuid4())},
     )
     assert resp.status_code == 422

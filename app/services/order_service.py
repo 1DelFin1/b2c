@@ -567,12 +567,14 @@ class OrderService:
         cls,
         session: AsyncSession,
         user_id: UUID,
-        req: CheckoutRequest,
+        idempotency_key: UUID,
+        data: OrderCreateRequest,
+        cart_items: list[CartItemStored] | None = None,
     ) -> CheckoutOrderResponse:
         """
         Canonical checkout:
           0. Idempotency check
-          1. Validate items (non-empty, qty >= 1)
+          1. Resolve items (from items_snapshot or cart)
           2. GET SKU data from B2B (price, stock, product_id, names)
           3. Pre-validate availability → 409 if any SKU fails
           4. POST /api/v1/reserve → 409 if reserve fails, 503 if B2B down
@@ -580,7 +582,7 @@ class OrderService:
         """
         # 0. Idempotency check
         existing = await session.scalar(
-            select(OrderModel).where(OrderModel.idempotency_key == req.idempotency_key)
+            select(OrderModel).where(OrderModel.idempotency_key == idempotency_key)
         )
         if existing:
             items_rows = list((await session.scalars(
@@ -588,9 +590,21 @@ class OrderService:
             )).all())
             return cls._build_checkout_response(existing, items_rows)
 
+        # 1. Resolve items to checkout
+        from app.schemas import CheckoutRequestItem
+        if data.items_snapshot:
+            items = [CheckoutRequestItem(sku_id=i.sku_id, quantity=i.quantity) for i in data.items_snapshot]
+        elif cart_items:
+            items = [CheckoutRequestItem(sku_id=i.sku_id, quantity=i.quantity) for i in cart_items]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "EMPTY_CART", "message": "Корзина пуста — передайте items_snapshot или наполните корзину"},
+            )
+
         # 2. Fetch SKU data from B2B
         sku_data: dict[str, dict] = {}  # sku_id_str -> sku_dict
-        for item in req.items:
+        for item in items:
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(
@@ -633,7 +647,7 @@ class OrderService:
 
         # 3. Pre-validate availability
         failed: list[dict] = []
-        for item in req.items:
+        for item in items:
             sku = sku_data.get(str(item.sku_id))
             if sku is None:
                 failed.append({
@@ -664,8 +678,8 @@ class OrderService:
 
         # 4. Reserve (all-or-nothing)
         reserve_payload = {
-            "idempotency_key": str(req.idempotency_key),
-            "items": [{"sku_id": str(i.sku_id), "quantity": i.quantity} for i in req.items],
+            "idempotency_key": str(idempotency_key),
+            "items": [{"sku_id": str(i.sku_id), "quantity": i.quantity} for i in items],
         }
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -706,7 +720,7 @@ class OrderService:
         order_id = uuid4()
         total_amount = sum(
             int((sku_data[str(i.sku_id)] or {}).get("price") or 0) * i.quantity
-            for i in req.items
+            for i in items
         )
 
         order = OrderModel(
@@ -714,19 +728,19 @@ class OrderService:
             user_id=user_id,
             status=OrderStatus.PAID,
             address_id=None,
-            delivery_address=req.delivery_address,
-            comment=None,
+            delivery_address=None,
+            comment=data.comment,
             subtotal=total_amount,
             delivery_cost=0,
             total=total_amount,
-            idempotency_key=req.idempotency_key,
+            idempotency_key=idempotency_key,
             paid_at=now,
         )
         session.add(order)
         await session.flush()
 
         order_items: list[OrderItemModel] = []
-        for item in req.items:
+        for item in items:
             sku = sku_data[str(item.sku_id)] or {}
             price = int(sku.get("price") or 0)
             product_id_str = str(sku.get("product_id") or "")
