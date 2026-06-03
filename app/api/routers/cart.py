@@ -19,6 +19,7 @@ from app.schemas import (
     CartValidationResponse,
     UnavailableReason,
 )
+# CartEnrichedResponse and CartMutationResponse kept for internal/validate use
 from app.services.cart_service import CartService
 
 cart_v1_router = APIRouter(prefix="/api/v1/cart", tags=["cart"])
@@ -99,18 +100,18 @@ async def _b2b_batch_products(product_ids: list[str]) -> list[dict]:
 
 # ── GET /cart ──────────────────────────────────────────────────────────────
 
-@cart_v1_router.get("", response_model=CartEnrichedResponse)
-async def get_cart(request: Request) -> CartEnrichedResponse:
+@cart_v1_router.get("", response_model=CartResponse)
+async def get_cart(request: Request) -> CartResponse:
     """Return cart enriched with live B2B data (prices, availability)."""
     identity, _ = _get_identity(request)
     stored = await CartService.get_items(identity)
 
     if not stored:
-        return CartService._build_cart_response([])
+        return CartService.to_response([], identity)
 
     product_ids = list({str(item.product_id) for item in stored})
     b2b_products = await _b2b_batch_products(product_ids)
-    return CartService.enrich(stored, b2b_products)
+    return CartService.enrich_to_cart_response(stored, b2b_products, identity)
 
 
 # ── DELETE /cart ───────────────────────────────────────────────────────────
@@ -123,11 +124,11 @@ async def clear_cart(request: Request) -> None:
 
 # ── POST /cart/items ───────────────────────────────────────────────────────
 
-@cart_v1_router.post("/items", response_model=CartMutationResponse)
+@cart_v1_router.post("/items", response_model=CartResponse)
 async def add_cart_item(
     request: Request,
     body: CartItemAddRequest = Body(...),
-) -> CartMutationResponse:
+) -> CartResponse:
     """Add SKU to cart. Returns 201 for new position, 200 for quantity increment."""
     identity, _ = _get_identity(request)
 
@@ -171,46 +172,21 @@ async def add_cart_item(
         image_url=image_url,
     )
 
-    # Find the updated item to report its new quantity
-    updated_item_stored = next(
-        (i for i in updated if str(i.sku_id) == str(body.sku_id)), None
-    )
-    new_quantity = updated_item_stored.quantity if updated_item_stored else body.quantity
-
-    item = CartItemEnriched(
-        item_id=body.sku_id,
-        sku_id=body.sku_id,
-        product_id=product_id,
-        product_title=name,
-        sku_name=name,
-        image_url=image_url,
-        unit_price=price,
-        quantity=new_quantity,
-        available_stock=active_qty,
-        line_total=price * new_quantity,
-        available=True,
-        unavailable_reason=None,
-    )
-
-    msg = "Товар добавлен в корзину" if is_new else "Количество увеличено"
-    mutation = CartService.make_mutation_response(msg, item, updated)
+    cart = CartService.to_response(updated, identity)
 
     from fastapi.responses import JSONResponse
     response_code = status.HTTP_201_CREATED if is_new else status.HTTP_200_OK
-    return JSONResponse(
-        content=mutation.model_dump(mode="json"),
-        status_code=response_code,
-    )
+    return JSONResponse(content=cart.model_dump(mode="json"), status_code=response_code)
 
 
-# ── PUT /cart/items/{sku_id} ───────────────────────────────────────────────
+# ── PATCH /cart/items/{sku_id} ────────────────────────────────────────────
 
-@cart_v1_router.put("/items/{sku_id}", response_model=CartMutationResponse)
+@cart_v1_router.patch("/items/{sku_id}", response_model=CartResponse)
 async def update_cart_item(
     request: Request,
     sku_id: UUID,
     body: CartItemUpdateRequest = Body(...),
-) -> CartMutationResponse:
+) -> CartResponse:
     """Update quantity of a cart position. Validates stock against B2B."""
     identity, _ = _get_identity(request)
 
@@ -232,26 +208,7 @@ async def update_cart_item(
         )
 
     updated = await CartService.update_item(identity, sku_id, body.quantity)
-    name = sku_data.get("name") or sku_data.get("title") or str(sku_id)
-    price = int(sku_data.get("price") or 0)
-    images = sku_data.get("images") or []
-    image_url = images[0].get("url") if images and isinstance(images[0], dict) else None
-
-    item = CartItemEnriched(
-        item_id=sku_id,
-        sku_id=sku_id,
-        product_id=UUID(str(sku_data["product_id"])),
-        product_title=name,
-        sku_name=name,
-        image_url=image_url,
-        unit_price=price,
-        quantity=body.quantity,
-        available_stock=active_qty,
-        line_total=price * body.quantity,
-        available=True,
-        unavailable_reason=None,
-    )
-    return CartService.make_mutation_response("Количество обновлено", item, updated)
+    return CartService.to_response(updated, identity)
 
 
 # ── DELETE /cart/items/{sku_id} ────────────────────────────────────────────
@@ -270,23 +227,23 @@ async def remove_cart_item(request: Request, sku_id: UUID) -> None:
 
 # ── POST /cart/merge ───────────────────────────────────────────────────────
 
-@cart_v1_router.post("/merge", response_model=CartEnrichedResponse)
+@cart_v1_router.post("/merge", response_model=CartResponse)
 async def merge_cart(
     request: Request,
     x_session_id: str = Header(..., alias="X-Session-Id"),
     payload: dict = Depends(get_current_active_auth_buyer),
-) -> CartEnrichedResponse:
+) -> CartResponse:
     """Merge guest cart into authenticated user cart. Conflict strategy: MAX(quantities)."""
     user_id = str(get_user_id(payload))
     guest_items = await CartService.get_items(x_session_id)
 
     if not guest_items:
         stored = await CartService.get_items(user_id)
-        product_ids = list({str(i.product_id) for i in stored})
         if not stored:
-            return CartService._build_cart_response([])
+            return CartService.to_response([], user_id)
+        product_ids = list({str(i.product_id) for i in stored})
         b2b = await _b2b_batch_products(product_ids)
-        return CartService.enrich(stored, b2b)
+        return CartService.enrich_to_cart_response(stored, b2b, user_id)
 
     user_items = await CartService.get_items(user_id)
     # MAX-merge strategy
@@ -305,7 +262,7 @@ async def merge_cart(
 
     product_ids = list({str(i.product_id) for i in merged_list})
     b2b = await _b2b_batch_products(product_ids)
-    return CartService.enrich(merged_list, b2b)
+    return CartService.enrich_to_cart_response(merged_list, b2b, user_id)
 
 
 # ── POST /cart/validate ────────────────────────────────────────────────────

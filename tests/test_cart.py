@@ -137,8 +137,8 @@ async def test_add_sku_increments_quantity_if_already_in_cart(ac, mock_identity)
 
     assert resp.status_code == 200  # existing item → 200
     body = resp.json()
-    assert body["item"]["quantity"] == 3
-    assert body["item"]["sku_id"] == str(SKU_ID_1)
+    item = next(i for i in body["items"] if i["sku_id"] == str(SKU_ID_1))
+    assert item["quantity"] == 3
 
 
 @pytest.mark.asyncio
@@ -154,8 +154,8 @@ async def test_add_new_sku_returns_201(ac, mock_identity):
 
     assert resp.status_code == 201
     body = resp.json()
-    assert body["item"]["sku_id"] == str(SKU_ID_1)
-    assert body["item"]["available"] is True
+    item = next(i for i in body["items"] if i["sku_id"] == str(SKU_ID_1))
+    assert item["is_available"] is True
 
 
 @pytest.mark.asyncio
@@ -173,21 +173,14 @@ async def test_get_cart_enriched_with_b2b_data(ac, mock_identity):
     assert len(body["items"]) == 1
     item = body["items"][0]
     assert item["sku_id"] == str(SKU_ID_1)
-    assert item["product_title"] == "iPhone 15 Pro"
+    assert item["name"] == "iPhone 15 Pro"
     assert item["unit_price"] == 15000_00       # live B2B price, not stored price
-    assert item["available"] is True
-    assert item["available_stock"] == 3
+    assert item["is_available"] is True
+    assert item["available_quantity"] == 3
     assert item["line_total"] == 15000_00 * 1   # qty=1
-
-    summary = body["summary"]
-    assert summary["total_amount"] == 15000_00
-    assert summary["total_items"] == 1
-    assert summary["available_items"] == 1
-    assert summary["has_unavailable_items"] is False
-    assert summary["checkout_ready"] is True
-
-    assert "checkout_payload" in body
-    assert len(body["checkout_payload"]["items"]) == 1
+    assert body["subtotal"] == 15000_00
+    assert body["items_count"] == 1
+    assert body["is_valid"] is True
 
 
 @pytest.mark.asyncio
@@ -199,8 +192,8 @@ async def test_get_empty_cart_returns_zeros(ac, mock_identity):
     assert resp.status_code == 200
     body = resp.json()
     assert body["items"] == []
-    assert body["summary"]["total_amount"] == 0
-    assert body["summary"]["checkout_ready"] is False
+    assert body["subtotal"] == 0
+    assert body["is_valid"] is True
 
 
 # ── Unhappy-path ──────────────────────────────────────────────────────────────
@@ -219,15 +212,10 @@ async def test_unavailable_sku_shown_with_reason(ac, mock_identity):
     assert resp.status_code == 200
     body = resp.json()
     item = body["items"][0]
-    assert item["available"] is False
-    assert item["unavailable_reason"] == "OUT_OF_STOCK"
+    assert item["is_available"] is False
     assert item["line_total"] == 0              # unavailable → 0
-
-    summary = body["summary"]
-    assert summary["total_amount"] == 0
-    assert summary["has_unavailable_items"] is True
-    assert summary["available_items"] == 0
-    assert summary["checkout_ready"] is False
+    assert body["subtotal"] == 0
+    assert body["is_valid"] is False
 
 
 @pytest.mark.asyncio
@@ -241,8 +229,7 @@ async def test_deleted_product_shown_with_delisted_reason(ac, mock_identity):
 
     assert resp.status_code == 200
     item = resp.json()["items"][0]
-    assert item["available"] is False
-    assert item["unavailable_reason"] == "PRODUCT_DELISTED"
+    assert item["is_available"] is False
 
 
 @pytest.mark.asyncio

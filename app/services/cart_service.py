@@ -270,8 +270,82 @@ class CartService:
         return updated_count
 
     # ------------------------------------------------------------------
-    # B2B enrichment
+    # B2B enrichment — spec-compliant CartResponse
     # ------------------------------------------------------------------
+
+    @classmethod
+    def enrich_to_cart_response(
+        cls,
+        stored: list[CartItemStored],
+        b2b_products: list[dict],
+        identity: str = "",
+    ) -> CartResponse:
+        """Build CartResponse (spec shape) from stored items and live B2B data."""
+        product_map: dict[str, dict] = {}
+        product_status: dict[str, str] = {}
+        product_title: dict[str, str] = {}
+        for p in b2b_products:
+            pid = str(p["id"])
+            product_status[pid] = p.get("status", "MODERATED")
+            product_title[pid] = p.get("title") or p.get("name") or ""
+            product_map[pid] = {str(s["id"]): s for s in (p.get("skus") or [])}
+
+        response_items: list[CartItemResponse] = []
+        for item in stored:
+            pid = str(item.product_id)
+            sid = str(item.sku_id)
+            image: ImageRef | None = None
+
+            # Defaults when B2B data unavailable
+            unit_price = item.unit_price_at_add
+            available_quantity = 0
+            is_available = False
+            name = item.name
+
+            if pid in product_map and product_status.get(pid) in ("MODERATED", "ACTIVE"):
+                sku_map = product_map[pid]
+                if sid in sku_map:
+                    sku = sku_map[sid]
+                    unit_price = int(sku.get("price") or item.unit_price_at_add)
+                    available_quantity = int(sku.get("active_quantity") or 0)
+                    is_available = available_quantity > 0
+                    name = product_title.get(pid) or sku.get("name") or item.name
+                    imgs = sku.get("images") or []
+                    if imgs and isinstance(imgs[0], dict) and imgs[0].get("url"):
+                        image = ImageRef(id=uuid4(), url=imgs[0]["url"], ordering=imgs[0].get("ordering", 0))
+
+            line_total = unit_price * item.quantity if is_available else 0
+            response_items.append(CartItemResponse(
+                sku_id=item.sku_id,
+                product_id=item.product_id,
+                name=name,
+                sku_code=item.sku_code,
+                image=image,
+                quantity=item.quantity,
+                unit_price=unit_price,
+                unit_price_at_add=item.unit_price_at_add,
+                line_total=line_total,
+                available_quantity=available_quantity,
+                is_available=is_available,
+            ))
+
+        items_count = sum(i.quantity for i in response_items)
+        subtotal = sum(i.line_total for i in response_items)
+        is_valid = all(i.is_available for i in response_items) if response_items else True
+
+        try:
+            cart_id = UUID(identity)
+        except (ValueError, AttributeError):
+            cart_id = uuid4()
+
+        return CartResponse(
+            id=cart_id,
+            items=response_items,
+            items_count=items_count,
+            subtotal=subtotal,
+            is_valid=is_valid,
+            updated_at=datetime.now(timezone.utc),
+        )
 
     @classmethod
     def enrich(
