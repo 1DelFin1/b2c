@@ -279,12 +279,12 @@ async def get_breadcrumbs(
     if category_id is not None and product_id is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "ambiguous_param", "message": "only one of category_id or product_id must be provided"},
+            detail={"code": "AMBIGUOUS_PARAM", "message": "only one of category_id or product_id must be provided"},
         )
     if category_id is None and product_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "missing_param", "message": "category_id or product_id must be provided"},
+            detail={"code": "MISSING_PARAM", "message": "category_id or product_id must be provided"},
         )
 
     resolved_via = "category_id"
@@ -331,7 +331,7 @@ async def get_breadcrumbs(
     if crumbs[0].get("parent_id") is not None:
         raise HTTPException(
             status_code=422,
-            detail={"error": "orphan_node", "message": "category hierarchy is broken"},
+            detail={"code": "ORPHAN_NODE", "message": "category hierarchy is broken"},
         )
 
     data = []
@@ -382,15 +382,43 @@ async def get_catalog_facets(request: Request, category_id: UUID = Query(...)):
     return await _proxy_get("/api/v1/public/catalog/facets", params=params)
 
 
-def _transform_categories_path(categories: list) -> list:
-    for cat in categories:
-        if isinstance(cat.get("path"), str):
-            cat["path"] = [p for p in cat["path"].split("/") if p]
-    return categories
+def _b2b_category_to_ref(cat: dict) -> dict:
+    """Convert B2B CategoryResponse to B2C CategoryRef.
+
+    B2B sends path as a materialized string "a/b/c"; B2C spec wants an array.
+    """
+    raw_path: str = cat.get("path") or ""
+    return {
+        "id": cat.get("id"),
+        "name": cat.get("name"),
+        "parent_id": cat.get("parent_id"),
+        "level": cat.get("level", 0),
+        "path": [seg for seg in raw_path.split("/") if seg],
+    }
+
+
+def _enrich_tree_node(node: dict, parent_id: str | None, level: int, path: list[str]) -> dict:
+    """Recursively convert B2B CategoryTreeResponse node to B2C CategoryTreeNode.
+
+    B2B tree only carries {id, name, children}; level, path and parent_id are computed here.
+    """
+    current_path = path + [node["id"]]
+    return {
+        "id": node.get("id"),
+        "name": node.get("name"),
+        "parent_id": parent_id,
+        "level": level,
+        "path": current_path,
+        "children": [
+            _enrich_tree_node(child, parent_id=node.get("id"), level=level + 1, path=current_path)
+            for child in node.get("children", [])
+        ],
+    }
 
 
 @catalog_router.get("/categories")
-async def proxy_categories():
+async def get_categories_flat():
+    """Flat category list; B2B already carries level and path."""
     url = f"{settings.service.B2B_URL}/api/v1/categories"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
@@ -402,12 +430,13 @@ async def proxy_categories():
             )
     data = resp.json()
     if resp.status_code == 200 and isinstance(data, list):
-        data = _transform_categories_path(data)
+        return JSONResponse(content=[_b2b_category_to_ref(c) for c in data], status_code=200)
     return JSONResponse(content=data, status_code=resp.status_code)
 
 
 @catalog_router.get("/categories/tree")
-async def proxy_categories_tree():
+async def get_categories_tree():
+    """Category tree; B2B tree omits level/path/parent_id — computed during traversal."""
     url = f"{settings.service.B2B_URL}/api/v1/categories/tree"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
@@ -419,7 +448,10 @@ async def proxy_categories_tree():
             )
     data = resp.json()
     if resp.status_code == 200 and isinstance(data, list):
-        data = _transform_categories_path(data)
+        return JSONResponse(
+            content=[_enrich_tree_node(node, parent_id=None, level=0, path=[]) for node in data],
+            status_code=200,
+        )
     return JSONResponse(content=data, status_code=resp.status_code)
 
 
