@@ -1,8 +1,8 @@
 """Tests for US-CART-01: избранное покупателя.
 
 DoD scenarios (b2c-cart-flows.md#b2c-6-favorites):
-  - add_to_favorites_returns_201
-  - repeat_add_returns_200_not_duplicate
+  - add_to_favorites_returns_204
+  - repeat_add_returns_204_not_duplicate
   - blocked_product_excluded_from_list
   - user_id_from_query_is_ignored
 """
@@ -58,30 +58,25 @@ def override_auth():
 # ── Happy-path ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_add_to_favorites_returns_201(ac):
-    """POST /api/v1/favorites/{id} → 201 on first add."""
+async def test_add_to_favorites_returns_204(ac):
+    """PUT /api/v1/favorites/{id} → 204 No Content (idempotent)."""
     with patch(
         "app.api.routers.favorites.FavoritesService.add",
         new=AsyncMock(return_value=(True, _ADDED_AT)),
     ):
-        resp = await ac.post(f"/api/v1/favorites/{PRODUCT_ID}")
+        resp = await ac.put(f"/api/v1/favorites/{PRODUCT_ID}")
 
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["product_id"] == str(PRODUCT_ID)
-    assert "added_at" in body
+    assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
-async def test_repeat_add_returns_200_not_duplicate(ac):
-    """POST /api/v1/favorites/{id} second time → 200, service.add called once (no duplicate)."""
+async def test_repeat_add_returns_204_not_duplicate(ac):
+    """PUT /api/v1/favorites/{id} second time → 204 (idempotent, service called once)."""
     add_mock = AsyncMock(return_value=(False, _ADDED_AT))
     with patch("app.api.routers.favorites.FavoritesService.add", new=add_mock):
-        resp = await ac.post(f"/api/v1/favorites/{PRODUCT_ID}")
+        resp = await ac.put(f"/api/v1/favorites/{PRODUCT_ID}")
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["product_id"] == str(PRODUCT_ID)
+    assert resp.status_code == 204
     add_mock.assert_called_once()
 
 
@@ -99,16 +94,15 @@ async def test_get_favorites_enriched_from_b2b(ac):
     assert body["total_count"] == 1
     assert len(body["items"]) == 1
     assert body["items"][0]["id"] == str(PRODUCT_ID)
-    assert body["items"][0]["title"] == "iPhone 15"
-    assert body["items"][0]["in_stock"] is True
+    assert body["items"][0]["name"] == "iPhone 15"
+    assert body["items"][0]["has_stock"] is True
 
 
 # ── Unhappy-path ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_blocked_product_excluded_from_list(ac):
-    """GET /api/v1/favorites — blocked product absent from B2B response is excluded from list."""
-    # Both products are in favorites DB, but B2B only returns product_1 (product_2 is blocked)
+    """GET /api/v1/favorites — blocked product absent from B2B response is excluded."""
     with patch(
         "app.api.routers.favorites.FavoritesService.get",
         new=AsyncMock(return_value=([PRODUCT_ID, PRODUCT_ID_2], 2)),
@@ -117,11 +111,9 @@ async def test_blocked_product_excluded_from_list(ac):
 
     assert resp.status_code == 200
     body = resp.json()
-    # total_count reflects what's stored (2), items only what B2B confirms (1)
     assert body["total_count"] == 2
     assert len(body["items"]) == 1
     assert body["items"][0]["id"] == str(PRODUCT_ID)
-    # PRODUCT_ID_2 (blocked) is NOT in the response
     item_ids = {item["id"] for item in body["items"]}
     assert str(PRODUCT_ID_2) not in item_ids
 
@@ -131,15 +123,12 @@ async def test_user_id_from_query_is_ignored(ac):
     """Passing user_id in query must not override the JWT user — IDOR prevention."""
     add_mock = AsyncMock(return_value=(True, _ADDED_AT))
     with patch("app.api.routers.favorites.FavoritesService.add", new=add_mock):
-        # Try to inject another user's ID via query param
-        resp = await ac.post(
+        resp = await ac.put(
             f"/api/v1/favorites/{PRODUCT_ID}?user_id={OTHER_USER_ID}"
         )
 
-    assert resp.status_code == 201
-    # Service must have been called with JWT user_id, not OTHER_USER_ID
+    assert resp.status_code == 204
     call_args = add_mock.call_args
-    # session is first arg, user_id is second
     actual_user_id = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("user_id")
     assert actual_user_id == USER_ID, (
         f"Expected JWT user_id {USER_ID}, got {actual_user_id} — IDOR vulnerability!"

@@ -256,7 +256,7 @@ async def test_insufficient_stock_returns_422(ac, mock_identity):
         )
 
     assert resp.status_code == 422
-    assert resp.json()["detail"]["code"] == "INSUFFICIENT_STOCK"
+    assert resp.json()["code"] == "INSUFFICIENT_STOCK"
 
 
 @pytest.mark.asyncio
@@ -278,7 +278,7 @@ async def test_sku_not_found_returns_404(ac, mock_identity):
         )
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["code"] == "SKU_NOT_FOUND"
+    assert resp.json()["code"] == "SKU_NOT_FOUND"
 
 
 @pytest.mark.asyncio

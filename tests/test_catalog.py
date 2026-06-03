@@ -77,7 +77,7 @@ async def test_catalog_returns_filtered_sorted_products(ac):
     """GET /api/v1/products?category_id=...&sort=price_asc → 200, canonical item shape."""
     with _patch_b2b(_mock_response(_B2B_PRODUCTS)):
         resp = await ac.get(
-            f"/api/v1/products?category_id={CATEGORY_ID}&sort=price_asc&limit=20"
+            f"/api/v1/catalog/products?category_id={CATEGORY_ID}&sort=price_asc&limit=20"
         )
 
     assert resp.status_code == 200
@@ -89,9 +89,9 @@ async def test_catalog_returns_filtered_sorted_products(ac):
 
     item = body["items"][0]
     assert item["id"] == "770e8400-e29b-41d4-a716-446655440002"
-    assert item["title"] == "iPhone 15 Pro Max"
-    assert item["price"] == 12999000
-    assert item["in_stock"] is True
+    assert item["name"] == "iPhone 15 Pro Max"
+    assert item["min_price"] == 12999000
+    assert item["has_stock"] is True
     assert "is_in_cart" in item
     assert "characteristics" not in item
 
@@ -117,17 +117,12 @@ async def test_facets_return_counts_per_filter_value(ac):
 @pytest.mark.asyncio
 async def test_invalid_sort_returns_400(ac):
     """GET /api/v1/products?sort=BOGUS → 400 with allowed values, no B2B call made."""
-    resp = await ac.get("/api/v1/products?sort=BOGUS")
+    resp = await ac.get("/api/v1/catalog/products?sort=BOGUS")
 
     assert resp.status_code == 400
     body = resp.json()
-    detail = body.get("detail", body)
-    if isinstance(detail, dict):
-        assert detail.get("code") == "INVALID_REQUEST"
-        message = detail.get("message", "")
-    else:
-        message = str(detail)
-    assert "price_asc" in message
+    assert body.get("code") == "INVALID_REQUEST"
+    assert "price_asc" in body.get("message", "")
 
 
 @pytest.mark.asyncio
@@ -140,6 +135,6 @@ async def test_b2b_unavailable_returns_502(ac):
     cm.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=cm):
-        resp = await ac.get(f"/api/v1/products?category_id={CATEGORY_ID}")
+        resp = await ac.get(f"/api/v1/catalog/products?category_id={CATEGORY_ID}")
 
     assert resp.status_code in (502, 503)

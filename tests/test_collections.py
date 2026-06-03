@@ -210,7 +210,7 @@ async def test_unknown_collection_returns_404(ac):
         resp = await ac.get(f"/api/v1/collections/{UNKNOWN_ID}/products")
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["code"] == "COLLECTION_NOT_FOUND"
+    assert resp.json()["code"] == "COLLECTION_NOT_FOUND"
 
 
 @pytest.mark.asyncio

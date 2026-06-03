@@ -99,7 +99,7 @@ async def test_duplicate_subscription_returns_409(ac):
         )
 
     assert resp.status_code == 409
-    assert resp.json()["detail"]["code"] == "SUBSCRIPTION_ALREADY_EXISTS"
+    assert resp.json()["code"] == "SUBSCRIPTION_ALREADY_EXISTS"
 
 
 @pytest.mark.asyncio
@@ -136,7 +136,7 @@ async def test_subscribe_to_unknown_product_returns_404(ac):
         )
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["code"] == "PRODUCT_NOT_FOUND"
+    assert resp.json()["code"] == "PRODUCT_NOT_FOUND"
 
 
 @pytest.mark.asyncio

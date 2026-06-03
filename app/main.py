@@ -41,10 +41,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     if isinstance(detail, dict):
         code = detail.get("code") or detail.get("error") or _STATUS_CODES.get(exc.status_code, "ERROR")
         message = detail.get("message") or str(detail)
+        content = {**detail, "code": code, "message": message}
     else:
         code = _STATUS_CODES.get(exc.status_code, "ERROR")
         message = str(detail) if detail is not None else "An error occurred"
-    return JSONResponse(status_code=exc.status_code, content={"code": code, "message": message})
+        content = {"code": code, "message": message}
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 @app.exception_handler(RequestValidationError)

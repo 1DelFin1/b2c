@@ -58,10 +58,10 @@ async def get_favorites(
                     ]
                     items.append({
                         "id": p["id"],
-                        "title": p.get("title") or p.get("name") or "",
+                        "name": p.get("title") or p.get("name") or "",
                         "slug": p.get("slug"),
-                        "price": min(prices) if prices else None,
-                        "in_stock": has_stock,
+                        "min_price": min(prices) if prices else None,
+                        "has_stock": has_stock,
                         "images": images,
                     })
         except Exception as exc:
@@ -76,19 +76,17 @@ async def get_favorites(
     )
 
 
-@favorites_v1_router.post("/{product_id}")
+@favorites_v1_router.put("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def add_favorite(
     product_id: UUID,
     session: SessionDep,
     payload: BuyerDep,
 ):
-    """Add product to favorites. 201 on first add, 200 on repeat (idempotent).
+    """Add product to favorites (idempotent).
     user_id from JWT only — query/body user_id is never accepted (IDOR prevention).
     """
     user_id = get_user_id(payload)
-    is_new, added_at = await FavoritesService.add(session, user_id, product_id)
-    body = {"product_id": str(product_id), "added_at": added_at.isoformat()}
-    return JSONResponse(content=body, status_code=201 if is_new else 200)
+    await FavoritesService.add(session, user_id, product_id)
 
 
 @favorites_v1_router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)

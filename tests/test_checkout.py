@@ -241,11 +241,11 @@ async def test_partial_reserve_failure_returns_409(ac):
         resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY)
 
     assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    assert detail["code"] == "RESERVE_FAILED"
-    assert len(detail["failed_items"]) == 1
-    assert detail["failed_items"][0]["reason"] == "OUT_OF_STOCK"
-    assert detail["failed_items"][0]["sku_id"] == str(SKU_ID_2)
+    body = resp.json()
+    assert body["code"] == "RESERVE_FAILED"
+    assert len(body["failed_items"]) == 1
+    assert body["failed_items"][0]["reason"] == "OUT_OF_STOCK"
+    assert body["failed_items"][0]["sku_id"] == str(SKU_ID_2)
 
 
 @pytest.mark.asyncio
@@ -299,7 +299,7 @@ async def test_b2b_unavailable_returns_503(ac):
         resp = await ac.post("/api/v1/orders", json=_CHECKOUT_BODY)
 
     assert resp.status_code == 503
-    assert resp.json()["detail"]["code"] == "B2B_UNAVAILABLE"
+    assert resp.json()["code"] == "B2B_UNAVAILABLE"
 
 
 @pytest.mark.asyncio

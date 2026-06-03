@@ -161,7 +161,7 @@ async def test_click_on_unknown_banner_returns_400(ac):
         )
 
     assert resp.status_code == 400
-    assert resp.json()["detail"]["code"] == "BANNER_NOT_FOUND"
+    assert resp.json()["code"] == "BANNER_NOT_FOUND"
 
 
 @pytest.mark.asyncio

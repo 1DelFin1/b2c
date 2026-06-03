@@ -52,32 +52,24 @@ def _patch_b2b(response):
 
 @pytest.mark.asyncio
 async def test_similar_returns_up_to_8_from_same_category(ac):
-    """GET /api/v1/products/{id}/similar → 200, up to 8 items, current product excluded."""
+    """GET /api/v1/catalog/products/{id}/similar → 200, flat array up to limit items."""
     b2b_items = _make_b2b_short(8)
     with _patch_b2b(_mock_response(b2b_items)):
-        resp = await ac.get(f"/api/v1/products/{PRODUCT_ID}/similar")
+        resp = await ac.get(f"/api/v1/catalog/products/{PRODUCT_ID}/similar?limit=8")
 
     assert resp.status_code == 200
     body = resp.json()
-    assert "items" in body
-    assert "total_count" in body
-    assert "limit" in body
-    assert "offset" in body
+    assert isinstance(body, list)
+    assert len(body) <= 8
 
-    assert len(body["items"]) <= 8
-    assert body["total_count"] == 8
-    assert body["limit"] == 8
-    assert body["offset"] == 0
-
-    item = body["items"][0]
+    item = body[0]
     assert "id" in item
-    assert "title" in item
-    assert "price" in item
-    assert "in_stock" in item
-    assert "is_in_cart" in item
+    assert "name" in item
+    assert "min_price" in item
+    assert "has_stock" in item
 
     # Current product must not appear in results
-    item_ids = {i["id"] for i in body["items"]}
+    item_ids = {i["id"] for i in body}
     assert PRODUCT_ID not in item_ids
 
 
@@ -85,21 +77,19 @@ async def test_similar_returns_up_to_8_from_same_category(ac):
 
 @pytest.mark.asyncio
 async def test_empty_category_returns_200_empty_list(ac):
-    """GET /api/v1/products/{id}/similar when no similar products → 200 with empty items."""
+    """GET /api/v1/catalog/products/{id}/similar when no similar products → 200 empty array."""
     with _patch_b2b(_mock_response([])):
-        resp = await ac.get(f"/api/v1/products/{PRODUCT_ID}/similar")
+        resp = await ac.get(f"/api/v1/catalog/products/{PRODUCT_ID}/similar")
 
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["items"] == []
-    assert body["total_count"] == 0
+    assert resp.json() == []
 
 
 @pytest.mark.asyncio
 async def test_unknown_product_returns_404(ac):
-    """GET /api/v1/products/{unknown_id}/similar → 404 from B2B proxied as-is."""
+    """GET /api/v1/catalog/products/{unknown_id}/similar → 404 from B2B proxied as-is."""
     not_found = {"code": "NOT_FOUND", "message": "Product not found"}
     with _patch_b2b(_mock_response(not_found, status_code=404)):
-        resp = await ac.get(f"/api/v1/products/{uuid4()}/similar")
+        resp = await ac.get(f"/api/v1/catalog/products/{uuid4()}/similar")
 
     assert resp.status_code == 404

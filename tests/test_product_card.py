@@ -100,27 +100,29 @@ def _patch_b2b(response):
 
 @pytest.mark.asyncio
 async def test_product_card_returns_full_data_with_skus(ac):
-    """GET /api/v1/products/{id} → 200, full card: images, description, SKUs with prices."""
+    """GET /api/v1/catalog/products/{id} → 200, full card: images, description, SKUs."""
     with _patch_b2b(_mock_response(_B2B_PRODUCT)):
-        resp = await ac.get(f"/api/v1/products/{PRODUCT_ID}")
+        resp = await ac.get(f"/api/v1/catalog/products/{PRODUCT_ID}")
 
     assert resp.status_code == 200
     body = resp.json()
 
-    # Top-level product fields
+    # Top-level product fields (CatalogProductDetail)
     assert body["id"] == PRODUCT_ID
     assert body["slug"] == "iphone-15-pro-max"
-    assert body["title"] == "iPhone 15 Pro Max"
+    assert body["name"] == "iPhone 15 Pro Max"
     assert body["description"]
-    assert body["status"] == "MODERATED"
+    assert body["has_stock"] is True
 
     # Images
     assert len(body["images"]) == 2
     assert "url" in body["images"][0]
     assert "ordering" in body["images"][0]
 
-    # Characteristics
-    assert len(body["characteristics"]) == 2
+    # Attributes (converted from characteristics array → dict)
+    assert isinstance(body["attributes"], dict)
+    assert len(body["attributes"]) == 2
+    assert body["attributes"]["Бренд"] == "Apple"
 
     # SKUs
     assert len(body["skus"]) == 2
@@ -128,14 +130,15 @@ async def test_product_card_returns_full_data_with_skus(ac):
     assert sku["id"] == SKU_ID_1
     assert sku["name"] == "256GB Black"
     assert sku["price"] == 12999000
-    assert sku["discount"] == 0
-    assert sku["image"] == "/s3/iphone15-black-256.jpg"
-    assert sku["active_quantity"] == 10
-    assert len(sku["characteristics"]) == 2
+    assert sku["old_price"] is None          # discount=0 → no old price
+    assert sku["images"][0]["url"] == "/s3/iphone15-black-256.jpg"
+    assert sku["available_quantity"] == 10
+    assert isinstance(sku["attributes"], dict)
+    assert len(sku["attributes"]) == 2
 
-    # SKU with discount
+    # SKU with discount: old_price = price + discount
     sku2 = body["skus"][1]
-    assert sku2["discount"] == 500000
+    assert sku2["old_price"] == 12999000 + 500000
 
 
 # ── Security: forbidden fields must not leak ──────────────────────────────────
@@ -144,7 +147,7 @@ async def test_product_card_returns_full_data_with_skus(ac):
 async def test_cost_price_absent_in_response(ac):
     """cost_price and reserved_quantity must not appear in any SKU in the B2C response."""
     with _patch_b2b(_mock_response(_B2B_PRODUCT)):
-        resp = await ac.get(f"/api/v1/products/{PRODUCT_ID}")
+        resp = await ac.get(f"/api/v1/catalog/products/{PRODUCT_ID}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -159,9 +162,9 @@ async def test_cost_price_absent_in_response(ac):
 
 @pytest.mark.asyncio
 async def test_blocked_product_returns_404(ac):
-    """GET /api/v1/products/{id} for a blocked/deleted product → 404 from B2B proxied as-is."""
+    """GET /api/v1/catalog/products/{id} for a blocked/deleted product → 404."""
     with _patch_b2b(_mock_response(_B2B_NOT_FOUND, status_code=404)):
-        resp = await ac.get(f"/api/v1/products/{PRODUCT_ID}")
+        resp = await ac.get(f"/api/v1/catalog/products/{PRODUCT_ID}")
 
     assert resp.status_code == 404
     body = resp.json()
@@ -170,7 +173,7 @@ async def test_blocked_product_returns_404(ac):
 
 @pytest.mark.asyncio
 async def test_sku_without_stock_is_shown_as_unavailable(ac):
-    """SKU with active_quantity=0 is present in the list with active_quantity=0 (not hidden)."""
+    """SKU with active_quantity=0 is present with available_quantity=0 (not hidden)."""
     product_out_of_stock = {
         **_B2B_PRODUCT,
         "skus": [
@@ -183,9 +186,9 @@ async def test_sku_without_stock_is_shown_as_unavailable(ac):
         ],
     }
     with _patch_b2b(_mock_response(product_out_of_stock)):
-        resp = await ac.get(f"/api/v1/products/{PRODUCT_ID}")
+        resp = await ac.get(f"/api/v1/catalog/products/{PRODUCT_ID}")
 
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["skus"]) == 1
-    assert body["skus"][0]["active_quantity"] == 0
+    assert body["skus"][0]["available_quantity"] == 0

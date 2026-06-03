@@ -63,23 +63,23 @@ def _patch_b2b(response):
 
 @pytest.mark.asyncio
 async def test_search_returns_matching_products(ac):
-    """GET /api/v1/products?search=наушники → 200, items matching title/description."""
+    """GET /api/v1/catalog/products?q=наушники → 200, items matching title/description."""
     with _patch_b2b(_mock_response(_B2B_SEARCH_RESULTS)):
-        resp = await ac.get("/api/v1/products?search=наушники")
+        resp = await ac.get("/api/v1/catalog/products?q=наушники")
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["total_count"] == 2
     assert len(body["items"]) == 2
 
-    titles = {item["title"] for item in body["items"]}
-    assert any("наушники" in t.lower() for t in titles)
+    names = {item["name"] for item in body["items"]}
+    assert any("наушники" in n.lower() for n in names)
 
     item = body["items"][0]
     assert "id" in item
-    assert "title" in item
-    assert "price" in item
-    assert "in_stock" in item
+    assert "name" in item
+    assert "min_price" in item
+    assert "has_stock" in item
     assert "is_in_cart" in item
 
 
@@ -87,44 +87,37 @@ async def test_search_returns_matching_products(ac):
 
 @pytest.mark.asyncio
 async def test_short_query_returns_400(ac):
-    """GET /api/v1/products?search=ab → 400, search query shorter than 3 chars."""
-    resp = await ac.get("/api/v1/products?search=ab")
+    """GET /api/v1/catalog/products?q=ab → 400, search query shorter than 3 chars."""
+    resp = await ac.get("/api/v1/catalog/products?q=ab")
 
     assert resp.status_code == 400
     body = resp.json()
-    detail = body.get("detail", body)
-    if isinstance(detail, dict):
-        assert detail.get("code") == "INVALID_REQUEST"
-        assert "3" in detail.get("message", "")
-    else:
-        assert "3" in str(detail)
+    assert body.get("code") == "INVALID_REQUEST"
+    assert "3" in body.get("message", "")
 
 
 @pytest.mark.asyncio
 async def test_special_chars_do_not_break_query(ac):
-    """GET /api/v1/products?search=iPhone%2515 — special chars (%, _, ') are proxied safely."""
+    """GET /api/v1/catalog/products?q=iPhone%2515 — special chars proxied safely."""
     with _patch_b2b(_mock_response(_B2B_SEARCH_RESULTS)):
-        # %25 decodes to %, so the actual search value contains a literal %
-        resp = await ac.get("/api/v1/products?search=iPhone%2515")
+        resp = await ac.get("/api/v1/catalog/products?q=iPhone%2515")
 
-    # Must not raise 500; B2C validates length only and passes the value to B2B
     assert resp.status_code == 200
 
-    # Also check underscore and single-quote do not cause errors
     with _patch_b2b(_mock_response(_B2B_EMPTY)):
-        resp2 = await ac.get("/api/v1/products?search=кофе'машина")
+        resp2 = await ac.get("/api/v1/catalog/products?q=кофе'машина")
     assert resp2.status_code == 200
 
     with _patch_b2b(_mock_response(_B2B_EMPTY)):
-        resp3 = await ac.get("/api/v1/products?search=super_deal")
+        resp3 = await ac.get("/api/v1/catalog/products?q=super_deal")
     assert resp3.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_empty_results_returns_200(ac):
-    """GET /api/v1/products?search=несуществующий → 200 with empty items list."""
+    """GET /api/v1/catalog/products?q=несуществующий → 200 with empty items list."""
     with _patch_b2b(_mock_response(_B2B_EMPTY)):
-        resp = await ac.get("/api/v1/products?search=несуществующийтовар")
+        resp = await ac.get("/api/v1/catalog/products?q=несуществующийтовар")
 
     assert resp.status_code == 200
     body = resp.json()
