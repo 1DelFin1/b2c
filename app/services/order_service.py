@@ -440,7 +440,7 @@ class OrderService:
                 detail={
                     "code": "CANCEL_NOT_ALLOWED",
                     "message": f"Отмена невозможна: заказ в статусе {order.status}",
-                    "current_status": order.status,
+                    "details": {"current_status": order.status},
                 },
             )
 
@@ -673,7 +673,7 @@ class OrderService:
         if failed:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "RESERVE_FAILED", "message": "Не удалось зарезервировать товары", "failed_items": failed},
+                detail={"code": "RESERVE_FAILED", "message": "Не удалось зарезервировать товары", "details": {"failed_items": failed}},
             )
 
         # 4. Reserve (all-or-nothing)
@@ -830,7 +830,7 @@ class OrderService:
                 detail={
                     "code": "INVALID_STATUS_TRANSITION",
                     "message": f"Cannot mark as DELIVERED: order is in status {order.status}",
-                    "current_status": order.status,
+                    "details": {"current_status": order.status},
                 },
             )
 

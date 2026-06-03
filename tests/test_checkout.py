@@ -234,7 +234,7 @@ async def test_partial_reserve_failure_returns_409(ac):
     ]
     exc = HTTPException(
         status_code=409,
-        detail={"code": "RESERVE_FAILED", "message": "Не удалось зарезервировать товары", "failed_items": failed_items},
+        detail={"code": "RESERVE_FAILED", "message": "Не удалось зарезервировать товары", "details": {"failed_items": failed_items}},
     )
 
     with patch(
@@ -246,9 +246,9 @@ async def test_partial_reserve_failure_returns_409(ac):
     assert resp.status_code == 409
     body = resp.json()
     assert body["code"] == "RESERVE_FAILED"
-    assert len(body["failed_items"]) == 1
-    assert body["failed_items"][0]["reason"] == "OUT_OF_STOCK"
-    assert body["failed_items"][0]["sku_id"] == str(SKU_ID_2)
+    assert len(body["details"]["failed_items"]) == 1
+    assert body["details"]["failed_items"][0]["reason"] == "OUT_OF_STOCK"
+    assert body["details"]["failed_items"][0]["sku_id"] == str(SKU_ID_2)
 
 
 @pytest.mark.asyncio

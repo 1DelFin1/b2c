@@ -157,7 +157,7 @@ async def test_cancel_assembling_order_returns_409():
     exc = exc_info.value
     assert exc.status_code == 409
     assert exc.detail["code"] == "CANCEL_NOT_ALLOWED"
-    assert exc.detail["current_status"] == OrderStatus.ASSEMBLING
+    assert exc.detail["details"]["current_status"] == OrderStatus.ASSEMBLING
 
 
 @pytest.mark.asyncio

@@ -41,7 +41,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     if isinstance(detail, dict):
         code = detail.get("code") or detail.get("error") or _STATUS_CODES.get(exc.status_code, "ERROR")
         message = detail.get("message") or str(detail)
-        content = {**detail, "code": code, "message": message}
+        content: dict = {"code": code, "message": message}
+        if "details" in detail:
+            content["details"] = detail["details"]
     else:
         code = _STATUS_CODES.get(exc.status_code, "ERROR")
         message = str(detail) if detail is not None else "An error occurred"
