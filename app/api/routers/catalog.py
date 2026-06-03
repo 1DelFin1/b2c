@@ -207,15 +207,14 @@ async def get_product(product_id: UUID):
 @catalog_router.get("/products/{product_id}/similar")
 async def get_similar_products(
     product_id: UUID,
-    limit: Annotated[int, Query(ge=1, le=20)] = 8,
-    offset: int = Query(default=0, ge=0),
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ):
     url = f"{settings.service.B2B_URL}/api/v1/public/products/{product_id}/similar"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.get(
                 url,
-                params={"limit": limit + offset},
+                params={"limit": limit},
                 headers={"X-Service-Key": settings.service.SERVICE_KEY},
             )
         except Exception as exc:
@@ -227,7 +226,6 @@ async def get_similar_products(
     if resp.status_code != 200:
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
     b2b_items = resp.json() if isinstance(resp.json(), list) else []
-    page = b2b_items[offset: offset + limit]
     items = [
         {
             "id": item.get("id"),
@@ -235,14 +233,10 @@ async def get_similar_products(
             "images": [{"url": item["cover_image"], "ordering": 0}] if item.get("cover_image") else [],
             "min_price": item.get("min_price", 0),
             "has_stock": bool(item.get("min_price")),
-            "is_in_cart": False,
         }
-        for item in page
+        for item in b2b_items
     ]
-    return JSONResponse(
-        content={"items": items, "total_count": len(b2b_items), "limit": limit, "offset": offset},
-        status_code=200,
-    )
+    return JSONResponse(content=items, status_code=200)
 
 
 def _enrich_tree_with_parent_id(nodes: list, parent_id: str | None = None) -> list:
