@@ -591,7 +591,7 @@ class NotifyEvent(str, Enum):
 
 
 class SubscribeRequest(BaseModel):
-    notify_on: list[NotifyEvent] = Field(
+    events: list[NotifyEvent] = Field(
         min_length=1,
         default=[NotifyEvent.IN_STOCK, NotifyEvent.PRICE_DOWN],
     )

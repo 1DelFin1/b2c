@@ -132,7 +132,7 @@ async def subscribe_favorite(
     if resp.status_code == 404:
         raise PRODUCT_NOT_FOUND
 
-    notify_on = [e.value for e in body.notify_on]
+    notify_on = [e.value for e in body.events]
     try:
         sub = await SubscriptionService.subscribe(session, user_id, product_id, notify_on)
     except IntegrityError:

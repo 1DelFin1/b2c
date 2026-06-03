@@ -61,7 +61,7 @@ async def test_subscribe_returns_201_with_notify_on(ac):
     ):
         resp = await ac.post(
             f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-            json={"notify_on": ["IN_STOCK", "PRICE_DOWN"]},
+            json={"events": ["IN_STOCK", "PRICE_DOWN"]},
         )
 
     assert resp.status_code == 201
@@ -95,7 +95,7 @@ async def test_duplicate_subscription_returns_409(ac):
     ):
         resp = await ac.post(
             f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-            json={"notify_on": ["IN_STOCK"]},
+            json={"events": ["IN_STOCK"]},
         )
 
     assert resp.status_code == 409
@@ -108,7 +108,7 @@ async def test_invalid_notify_on_returns_400(ac):
     with _mock_b2b_product(200):
         resp = await ac.post(
             f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-            json={"notify_on": []},
+            json={"events": []},
         )
 
     assert resp.status_code == 422
@@ -120,7 +120,7 @@ async def test_invalid_notify_on_bad_value_returns_422(ac):
     with _mock_b2b_product(200):
         resp = await ac.post(
             f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-            json={"notify_on": ["INVALID_EVENT"]},
+            json={"events": ["INVALID_EVENT"]},
         )
 
     assert resp.status_code == 422
@@ -132,7 +132,7 @@ async def test_subscribe_to_unknown_product_returns_404(ac):
     with _mock_b2b_product(404):
         resp = await ac.post(
             f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-            json={"notify_on": ["IN_STOCK"]},
+            json={"events": ["IN_STOCK"]},
         )
 
     assert resp.status_code == 404
@@ -149,7 +149,7 @@ async def test_user_id_from_jwt_only(ac):
     ):
         resp = await ac.post(
             f"/api/v1/favorites/{PRODUCT_ID}/subscribe?user_id={OTHER_USER_ID}",
-            json={"notify_on": ["IN_STOCK"]},
+            json={"events": ["IN_STOCK"]},
         )
 
     assert resp.status_code == 201
